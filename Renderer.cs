@@ -64,12 +64,12 @@ public sealed class Renderer
 
         terrain = new Shader(@"#version 330 core
 layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV; layout(location=2) in float aShade;
-layout(location=3) in float aSky; layout(location=4) in vec3 aTint;
+layout(location=3) in float aSky; layout(location=4) in float aBlk; layout(location=5) in vec3 aTint;
 uniform mat4 uVP; uniform vec3 uOff;
-out vec2 vUV; out float vShade; out float vSky; out vec3 vTint; out float vDist;
-void main(){ vec3 p = aPos + uOff; gl_Position = uVP*vec4(p,1.0); vUV=aUV; vShade=aShade; vSky=aSky; vTint=aTint; vDist=length(p); }",
+out vec2 vUV; out float vShade; out float vSky; out float vBlk; out vec3 vTint; out float vDist;
+void main(){ vec3 p = aPos + uOff; gl_Position = uVP*vec4(p,1.0); vUV=aUV; vShade=aShade; vSky=aSky; vBlk=aBlk; vTint=aTint; vDist=length(p); }",
 @"#version 330 core
-in vec2 vUV; in float vShade; in float vSky; in vec3 vTint; in float vDist;
+in vec2 vUV; in float vShade; in float vSky; in float vBlk; in vec3 vTint; in float vDist;
 uniform sampler2D uTex; uniform float uDay; uniform vec3 uNight; uniform vec3 uFogColor; uniform vec2 uFog; uniform float uWater; uniform float uWaterAlpha;
 out vec4 FragColor;
 void main(){
@@ -77,10 +77,14 @@ void main(){
   if (uWater < 0.5 && t.a < 0.4) discard;
   float mask = clamp((1.0 - t.a) * 255.0 / 55.0, 0.0, 1.0);
   vec3 col = t.rgb * mix(vec3(1.0), vTint, mask) * vShade;
-  float l = clamp(vSky * uDay, 0.0, 1.0);
-  float b = l / (4.0 - 3.0 * l);
-  b = 0.035 + 0.965 * b;
-  col *= b * uNight;
+  float sl = clamp(vSky * uDay, 0.0, 1.0);
+  float sb = sl / (4.0 - 3.0 * sl);
+  float bl = clamp(vBlk, 0.0, 1.0);
+  float bb = bl / (4.0 - 3.0 * bl);
+  float b = 0.04 + 0.96 * max(sb, bb);
+  float warm = clamp(bb / (sb + bb + 0.0001), 0.0, 1.0);
+  vec3 lightCol = mix(uNight, vec3(1.0, 0.84, 0.64), warm * smoothstep(0.0, 0.35, bb));
+  col *= b * lightCol;
   float f = clamp((vDist - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0);
   col = mix(col, uFogColor, f);
   FragColor = vec4(col, uWater > 0.5 ? uWaterAlpha : 1.0);
@@ -174,6 +178,7 @@ uniform vec4 uColor; out vec4 FragColor; void main(){ FragColor = uColor; }");
         if (frame == waterFrame) return;
         waterFrame = frame;
         TextureGen.WaterFrame(atlas, frame);
+        TextureGen.FireFrame(atlas, frame);
         GL.BindTexture(TextureTarget.Texture2D, atlasTex);
         GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, TextureGen.Size, TextureGen.Size, PixelFormat.Rgba, PixelType.UnsignedByte, atlas);
         GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);

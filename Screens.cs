@@ -43,7 +43,7 @@ public static class Icons
     public static void Block(UiBatch ui, int atlas, byte id, float x, float y, float s)
     {
         ui.SetTex(atlas);
-        if (Blk.Cross[id]) { PolyFace(ui, Blk.Tex[id * 6], id, 1f, x, y, x + s, y, x + s, y + s, x, y + s); return; }
+        if (Blk.Sprite[id]) { PolyFace(ui, Blk.Tex[id * 6], id, 1f, x, y, x + s, y, x + s, y + s, x, y + s); return; }
         float h = s / 2, q = s / 4;
         // top
         PolyFace(ui, Blk.Tex[id * 6 + 2], id, 1f, x + h, y, x + s, y + q, x + h, y + h, x, y + q);
@@ -462,7 +462,7 @@ public sealed class InventoryScreen : Screen
     static readonly byte[] Items = {
         Blk.Stone, Blk.Grass, Blk.Dirt, Blk.Cobble, Blk.Planks, Blk.Sand, Blk.Gravel, Blk.Log, Blk.Leaves,
         Blk.Sandstone, Blk.SnowGrass, Blk.Snow, Blk.Glass, Blk.Bricks, Blk.CoalOre, Blk.IronOre, Blk.GoldOre,
-        Blk.DiamondOre, Blk.Bedrock, Blk.Cactus, Blk.TallGrass, Blk.Dandelion, Blk.Poppy, Blk.Water };
+        Blk.DiamondOre, Blk.Bedrock, Blk.Cactus, Blk.TallGrass, Blk.Dandelion, Blk.Poppy, Blk.Water, Blk.TorchFloor, Blk.FlintSteel };
     const int PW = 176, PH = 136;
     int px, py;
     protected override void Build() { px = (W - PW) / 2; py = (H - PH) / 2; }

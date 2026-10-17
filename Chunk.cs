@@ -16,6 +16,7 @@ public sealed class Chunk
     public readonly int X, Z;
     public readonly byte[] Blocks = new byte[Width * Width * Height];
     public readonly byte[] Sky = new byte[Width * Width * Height];
+    public readonly byte[] Bl = new byte[Width * Width * Height];   // block light
     public int State;              // 0 generated, 1 lit & inserted, -1 unloaded
     public int ReadyNeighbors;     // number of the 8 neighbours that are inserted
     public readonly GpuMesh[] Opaque = new GpuMesh[Sections];

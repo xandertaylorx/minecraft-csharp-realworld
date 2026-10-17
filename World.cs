@@ -59,6 +59,12 @@ public sealed class World
         if (c == null) return true;
         return Blk.Solid[c.Blocks[(x & 15) + (z & 15) * 16 + y * 256]];
     }
+    public int BlockLightAt(int x, int y, int z)
+    {
+        if (y < 0 || y >= Chunk.Height) return 0;
+        var c = GC(x >> 4, z >> 4);
+        return c == null ? 0 : c.Bl[(x & 15) + (z & 15) * 16 + y * 256];
+    }
     public int SkyAt(int x, int y, int z)
     {
         if (y < 0) return 0; if (y >= Chunk.Height) return 15;
@@ -94,24 +100,82 @@ public sealed class World
         ch.Blocks[i] = id;
         RecordEdit(ch.X, ch.Z, i, id);
         int oldOp = Blk.Opacity[old], newOp = Blk.Opacity[id];
+
+        // ---- sky light
         if (newOp > oldOp)
         {
-            RemoveLight(x, y, z, ch.Sky[i]);
+            RemoveLight(x, y, z, ch.Sky[i], true);
         }
         else if (newOp < oldOp)
         {
             var q = new Queue<(int, int, int)>();
             bool sun = y + 1 >= Chunk.Height || (SkyAt(x, y + 1, z) == 15 && newOp == 0);
             if (sun) { ch.Sky[i] = 15; q.Enqueue((x, y, z)); }
-            for (int d = 0; d < 6; d++)
-            {
-                int nx = x + Dx[d], ny = y + Dy[d], nz = z + Dz[d];
-                if (ny < 0 || ny >= Chunk.Height) continue;
-                if (GC(nx >> 4, nz >> 4) != null) q.Enqueue((nx, ny, nz));
-            }
-            SpreadLight(q);
+            EnqueueNeighbours(q, x, y, z);
+            SpreadLight(q, true);
+        }
+
+        // ---- block light (torches, fire)
+        int oldBl = ch.Bl[i];
+        bool wasOpaque = oldOp >= 15, nowOpaque = newOp >= 15;
+        if (oldBl > 0 && (Blk.Emit[old] > 0 || nowOpaque)) RemoveLight(x, y, z, oldBl, false);
+        if (Blk.Emit[id] > 0)
+        {
+            if (ch.Bl[i] < Blk.Emit[id]) ch.Bl[i] = Blk.Emit[id];
+            var q = new Queue<(int, int, int)>();
+            q.Enqueue((x, y, z));
+            SpreadLight(q, false);
+        }
+        else if (wasOpaque && !nowOpaque)
+        {
+            var q = new Queue<(int, int, int)>();
+            EnqueueNeighbours(q, x, y, z);
+            SpreadLight(q, false);
         }
         MarkCell(x, y, z, true);
+        OnBlockChanged(x, y, z, old, id);
+    }
+
+    void EnqueueNeighbours(Queue<(int, int, int)> q, int x, int y, int z)
+    {
+        for (int d = 0; d < 6; d++)
+        {
+            int nx = x + Dx[d], ny = y + Dy[d], nz = z + Dz[d];
+            if (ny < 0 || ny >= Chunk.Height) continue;
+            if (GC(nx >> 4, nz >> 4) != null) q.Enqueue((nx, ny, nz));
+        }
+    }
+
+    // ------------------------------------------------------------------ neighbour updates (support, etc.)
+    public static void SupportOf(byte b, int x, int y, int z, out int sx, out int sy, out int sz)
+    {
+        sx = x; sy = y; sz = z;
+        switch (b)
+        {
+            case Blk.TorchPX: sx = x + 1; break;
+            case Blk.TorchNX: sx = x - 1; break;
+            case Blk.TorchPZ: sz = z + 1; break;
+            case Blk.TorchNZ: sz = z - 1; break;
+            default: sy = y - 1; break;
+        }
+    }
+    public static bool CanSupportTorch(byte b) => Blk.Opaque[b];
+
+    void CheckSupport(int x, int y, int z)
+    {
+        byte b = GetBlock(x, y, z);
+        if (b == Blk.Air) return;
+        if (Blk.Cross[b]) { if (!Blk.Solid[GetBlock(x, y - 1, z)]) SetBlock(x, y, z, Blk.Air); }
+        else if (Blk.TorchT[b])
+        {
+            SupportOf(b, x, y, z, out int sx, out int sy, out int sz);
+            if (!CanSupportTorch(GetBlock(sx, sy, sz))) SetBlock(x, y, z, Blk.Air);
+        }
+    }
+
+    void OnBlockChanged(int x, int y, int z, byte old, byte now)
+    {
+        for (int d = 0; d < 6; d++) CheckSupport(x + Dx[d], y + Dy[d], z + Dz[d]);
     }
 
     // ------------------------------------------------------------------ lighting
@@ -132,14 +196,16 @@ public sealed class World
                 }
     }
 
-    void SpreadLight(Queue<(int x, int y, int z)> q)
+    static byte[] Arr(Chunk c, bool sky) => sky ? c.Sky : c.Bl;
+
+    void SpreadLight(Queue<(int x, int y, int z)> q, bool sky)
     {
         while (q.Count > 0)
         {
             var (x, y, z) = q.Dequeue();
             var ch = GC(x >> 4, z >> 4);
             if (ch == null) continue;
-            int L = ch.Sky[(x & 15) + (z & 15) * 16 + y * 256];
+            int L = Arr(ch, sky)[(x & 15) + (z & 15) * 16 + y * 256];
             if (L <= 1) continue;
             for (int d = 0; d < 6; d++)
             {
@@ -150,10 +216,11 @@ public sealed class World
                 int ni = (nx & 15) + (nz & 15) * 16 + ny * 256;
                 int op = Blk.Opacity[nc.Blocks[ni]];
                 if (op >= 15) continue;
-                int nl = (d == 3 && L == 15 && op == 0) ? 15 : L - Math.Max(1, op);
-                if (nl > nc.Sky[ni])
+                int nl = sky ? ((d == 3 && L == 15 && op == 0) ? 15 : L - Math.Max(1, op)) : L - 1;
+                var arr = Arr(nc, sky);
+                if (nl > arr[ni])
                 {
-                    nc.Sky[ni] = (byte)nl;
+                    arr[ni] = (byte)nl;
                     MarkCell(nx, ny, nz, false);
                     q.Enqueue((nx, ny, nz));
                 }
@@ -161,12 +228,12 @@ public sealed class World
         }
     }
 
-    void RemoveLight(int x, int y, int z, int oldL)
+    void RemoveLight(int x, int y, int z, int oldL, bool sky)
     {
         var rq = new Queue<(int x, int y, int z, int l)>();
         var addq = new Queue<(int x, int y, int z)>();
         var c0 = GC(x >> 4, z >> 4);
-        c0.Sky[(x & 15) + (z & 15) * 16 + y * 256] = 0;
+        Arr(c0, sky)[(x & 15) + (z & 15) * 16 + y * 256] = 0;
         rq.Enqueue((x, y, z, oldL));
         while (rq.Count > 0)
         {
@@ -178,18 +245,19 @@ public sealed class World
                 var nc = GC(nx >> 4, nz >> 4);
                 if (nc == null) continue;
                 int ni = (nx & 15) + (nz & 15) * 16 + ny * 256;
-                int nl = nc.Sky[ni];
+                var arr = Arr(nc, sky);
+                int nl = arr[ni];
                 if (nl == 0) continue;
-                if (nl < cl || (d == 3 && cl == 15 && nl == 15))
+                if (nl < cl || (sky && d == 3 && cl == 15 && nl == 15))
                 {
-                    nc.Sky[ni] = 0;
+                    arr[ni] = 0;
                     MarkCell(nx, ny, nz, false);
                     rq.Enqueue((nx, ny, nz, nl));
                 }
                 else if (nl >= cl) addq.Enqueue((nx, ny, nz));
             }
         }
-        SpreadLight(addq);
+        SpreadLight(addq, sky);
     }
 
     void InitLight(Chunk ch)
@@ -233,6 +301,17 @@ public sealed class World
                     }
                     if (need) q.Enqueue((wx0 + x, y, wz0 + z));
                 }
+        // block light emitters (placed torches / fire restored from the save) and neighbour spill
+        var qb = new Queue<(int, int, int)>();
+        lock (Edits)
+            if (Edits.TryGetValue(Key(ch.X, ch.Z), out var ed))
+                foreach (var kv in ed)
+                {
+                    int em = Blk.Emit[kv.Value];
+                    if (em == 0) continue;
+                    ch.Bl[kv.Key] = (byte)em;
+                    qb.Enqueue((wx0 + (kv.Key & 15), kv.Key >> 8, wz0 + ((kv.Key >> 4) & 15)));
+                }
         // neighbour edge cells spill light into the new chunk
         int[] hdx = { 1, -1, 0, 0 }, hdz = { 0, 0, 1, -1 };
         for (int d = 0; d < 4; d++)
@@ -245,12 +324,13 @@ public sealed class World
                 {
                     int lx, lz;
                     if (d == 0) { lx = 0; lz = t; } else if (d == 1) { lx = 15; lz = t; } else if (d == 2) { lx = t; lz = 0; } else { lx = t; lz = 15; }
-                    // d indexes Dx/Dz order {+x,-x,+z? } -> remap below
                     int idx = lx + lz * 16 + y * 256;
                     if (nc.Sky[idx] >= 2) q.Enqueue((ncx * 16 + lx, y, ncz * 16 + lz));
+                    if (nc.Bl[idx] >= 2) qb.Enqueue((ncx * 16 + lx, y, ncz * 16 + lz));
                 }
         }
-        SpreadLight(q);
+        SpreadLight(q, true);
+        SpreadLight(qb, false);
         for (int sy = 0; sy < Chunk.Sections; sy++) dirty.Add((ch.X, ch.Z, sy));
     }
 
@@ -400,7 +480,8 @@ public sealed class World
             GL.EnableVertexAttribArray(1); GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, stride, 12);
             GL.EnableVertexAttribArray(2); GL.VertexAttribPointer(2, 1, VertexAttribPointerType.Float, false, stride, 20);
             GL.EnableVertexAttribArray(3); GL.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, stride, 24);
-            GL.EnableVertexAttribArray(4); GL.VertexAttribPointer(4, 3, VertexAttribPointerType.Float, false, stride, 28);
+            GL.EnableVertexAttribArray(4); GL.VertexAttribPointer(4, 1, VertexAttribPointerType.Float, false, stride, 28);
+            GL.EnableVertexAttribArray(5); GL.VertexAttribPointer(5, 3, VertexAttribPointerType.Float, false, stride, 32);
             GL.BindBuffer(BufferTarget.ElementArrayBuffer, SharedEbo);
         }
         else { GL.BindVertexArray(m.Vao); GL.BindBuffer(BufferTarget.ArrayBuffer, m.Vbo); }
@@ -448,7 +529,7 @@ public sealed class World
         for (int i = 0; i < 200; i++)
         {
             byte b = GetBlock(x, y, z);
-            if (b != Blk.Air && b != Blk.Water) { hx = x; hy = y; hz = z; nx = fx; ny = fy; nz = fz; return true; }
+            if (b != Blk.Air && !Blk.WaterT[b]) { hx = x; hy = y; hz = z; nx = fx; ny = fy; nz = fz; return true; }
             double t;
             if (tmx < tmy && tmx < tmz) { t = tmx; x += sx; tmx += tdx; fx = -sx; fy = 0; fz = 0; }
             else if (tmy < tmz) { t = tmy; y += sy; tmy += tdy; fx = 0; fy = -sy; fz = 0; }

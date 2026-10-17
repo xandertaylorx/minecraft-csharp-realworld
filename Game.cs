@@ -12,7 +12,7 @@ public sealed class Game : GameWindow
     public Renderer Renderer;
     public Settings Settings = Settings.Load();
     public double Time;
-    public readonly byte[] Hotbar = { Blk.Stone, Blk.Cobble, Blk.Dirt, Blk.Planks, Blk.Log, Blk.Glass, Blk.Sand, Blk.Bricks, Blk.Leaves };
+    public readonly byte[] Hotbar = { Blk.Stone, Blk.Cobble, Blk.Dirt, Blk.Planks, Blk.Log, Blk.Glass, Blk.TorchFloor, Blk.Water, Blk.FlintSteel };
     public int Selected;
 
     World world, pano;
@@ -37,7 +37,7 @@ public sealed class Game : GameWindow
     // --shot mode
     readonly string[] args;
     string shotPath, shotScene = "title", shotScreen; int shotDelay = 40; int shotFrames; bool shotPlaced;
-    double[] shotPos; float[] shotRot; long shotSeed = 1234; long shotTime = -1; bool shotFly;
+    readonly List<(int, int, int, byte)> shotSets = new(); double[] shotPos; float[] shotRot; long shotSeed = 1234; long shotTime = -1; bool shotFly;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws, string[] args) : base(gws, nws)
     {
@@ -57,6 +57,7 @@ public sealed class Game : GameWindow
                 case "--pos": shotPos = new[] { double.Parse(args[++i]), double.Parse(args[++i]), double.Parse(args[++i]) }; break;
                 case "--rot": shotRot = new[] { float.Parse(args[++i]), float.Parse(args[++i]) }; break;
                 case "--rd": Settings.RenderDist = int.Parse(args[++i]); break;
+                case "--set": shotSets.Add((int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), byte.Parse(args[++i]))); break;
             }
         }
     }
@@ -289,7 +290,6 @@ public sealed class Game : GameWindow
         byte b = world.GetBlock(x, y, z);
         if (b == Blk.Bedrock && false) return;
         world.SetBlock(x, y, z, Blk.Air);
-        if (Blk.Cross[world.GetBlock(x, y + 1, z)]) world.SetBlock(x, y + 1, z, Blk.Air);
     }
     void PlaceBlock()
     {
@@ -299,6 +299,17 @@ public sealed class Game : GameWindow
         int px = x + nx, py = y + ny, pz = z + nz;
         if (Blk.Cross[world.GetBlock(x, y, z)]) { px = x; py = y; pz = z; }
         if (!Blk.IsReplaceable(world.GetBlock(px, py, pz))) return;
+        if (Blk.TorchT[id])
+        {
+            // pick the torch variant from the face that was clicked
+            if (nx == 0 && ny == 0 && nz == 0) { nx = 0; ny = 1; }
+            if (ny == 1) id = Blk.TorchFloor;
+            else if (ny == -1) return;
+            else id = nx == 1 ? Blk.TorchNX : nx == -1 ? Blk.TorchPX : nz == 1 ? Blk.TorchNZ : Blk.TorchPZ;
+            World.SupportOf(id, px, py, pz, out int sx, out int sy, out int sz);
+            if (!World.CanSupportTorch(world.GetBlock(sx, sy, sz))) return;
+        }
+        else if (id >= 128) return;
         if (Blk.Solid[id] && P.IntersectsBlock(px, py, pz)) return;
         if (Blk.Cross[id] && !Blk.Solid[world.GetBlock(px, py - 1, pz)]) return;
         world.SetBlock(px, py, pz, id);
@@ -488,7 +499,7 @@ public sealed class Game : GameWindow
             lines.Add($"Block: {bx} {by} {bz}");
             lines.Add($"Chunk: {bx & 15} {by & 15} {bz & 15} in {bx >> 4} {by >> 4} {bz >> 4}");
             lines.Add($"Facing: {facing} ({P.Yaw:0.0} / {P.Pitch:0.0})");
-            lines.Add($"Light: {world.SkyAt(bx, by, bz)} (sky)");
+            lines.Add($"Light: {world.SkyAt(bx, by, bz)} sky, {world.BlockLightAt(bx, by, bz)} block");
             var col = world.Gen.Column(bx, bz);
             lines.Add($"Biome: {col.Biome}  t={col.T:0.00} h={col.Hu:0.00}");
             lines.Add($"Seed: {world.Seed}   Time: {world.Time % 24000}");
@@ -552,6 +563,7 @@ public sealed class Game : GameWindow
             if (shotPos != null) P.SetPos(shotPos[0], shotPos[1], shotPos[2]);
             if (shotRot != null) { P.Yaw = shotRot[0]; P.Pitch = shotRot[1]; }
             if (shotFly) P.Flying = true;
+            foreach (var (sx, sy, sz, sid) in shotSets) world.SetBlock(sx, sy, sz, sid);
             if (shotScreen != null) ApplyShotScreen();
             return;
         }

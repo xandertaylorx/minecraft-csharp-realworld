@@ -106,12 +106,12 @@ public sealed class Player
         for (int y = y0; y <= y1 && !inw; y++)
             for (int z = z0; z <= z1 && !inw; z++)
                 for (int x = x0; x <= x1; x++)
-                    if (w.GetBlock(x, y, z) == Blk.Water) { inw = true; break; }
+                    if (Blk.WaterT[w.GetBlock(x, y, z)]) { inw = true; break; }
         InWater = inw;
         if (InWater && Flying) { }
         double ey = Y + EyeH;
         int bx = (int)Math.Floor(X), by = (int)Math.Floor(ey), bz = (int)Math.Floor(Z);
-        EyeInWater = w.GetBlock(bx, by, bz) == Blk.Water && ey < by + (w.GetBlock(bx, by + 1, bz) == Blk.Water ? 1.0 : 8.0 / 9.0);
+        EyeInWater = Blk.WaterT[w.GetBlock(bx, by, bz)] && ey < by + (Blk.WaterT[w.GetBlock(bx, by + 1, bz)] ? 1.0 : 8.0 / 9.0);
     }
 
     public bool Collides(World w, double x, double y, double z)

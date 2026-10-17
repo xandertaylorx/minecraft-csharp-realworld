@@ -283,7 +283,56 @@ public static class TextureGen
                     P(T.CactusTop, x, y, (edge ? 60 : inner ? 104 : 88) + j, (edge ? 96 : inner ? 148 : 130) + j, (edge ? 32 : inner ? 56 : 48) + j * .5f);
                 }
         }
+        // torch sprite: 2px wide stick (columns 7-8, rows 6-15) with a glowing tip
+        {
+            for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++) P(T.Torch, x, y, 0, 0, 0, 0);
+            for (int y = 8; y < 16; y++) { P(T.Torch, 7, y, 130 - (y % 3) * 6, 98 - (y % 3) * 5, 56, 255); P(T.Torch, 8, y, 98 - (y % 3) * 5, 72 - (y % 3) * 4, 40, 255); }
+            P(T.Torch, 7, 6, 255, 236, 120); P(T.Torch, 8, 6, 255, 214, 80);
+            P(T.Torch, 7, 7, 255, 190, 56); P(T.Torch, 8, 7, 240, 150, 30);
+        }
+        // flint and steel sprite
+        {
+            for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++) P(T.FlintSteel, x, y, 0, 0, 0, 0);
+            void Px(int x, int y, int r, int g, int b) => P(T.FlintSteel, x, y, r, g, b);
+            // steel striker (L / C shape)
+            for (int y = 8; y <= 13; y++) { Px(2, y, 70, 70, 82); Px(3, y, 188, 188, 198); }
+            for (int x = 2; x <= 9; x++) { Px(x, 13, 70, 70, 82); Px(x, 12, 188, 188, 198); }
+            for (int y = 8; y <= 12; y++) { Px(9, y, 70, 70, 82); Px(8, y, 188, 188, 198); }
+            Px(2, 7, 70, 70, 82); Px(3, 7, 70, 70, 82); Px(8, 7, 70, 70, 82); Px(9, 7, 70, 70, 82);
+            Px(3, 9, 235, 235, 242); Px(3, 10, 235, 235, 242); Px(5, 12, 235, 235, 242);
+            // flint chunk
+            int[][] flint = { new[] { 9, 11 }, new[] { 8, 12 }, new[] { 8, 12 }, new[] { 9, 12 }, new[] { 10, 12 } };
+            for (int r = 0; r < flint.Length; r++)
+                for (int x = flint[r][0]; x <= flint[r][1]; x++)
+                {
+                    float v = 52 + ((x + r) % 3) * 10;
+                    Px(x, 3 + r, (int)v, (int)v, (int)(v + 6));
+                }
+            Px(9, 4, 96, 96, 104); Px(10, 5, 90, 90, 98);
+            Px(11, 8, 255, 205, 70); Px(10, 9, 255, 150, 40); // spark
+        }
+        FireFrame(A, 0);
         return A;
+    }
+
+    public static void FireFrame(byte[] atlas, int f)
+    {
+        A = atlas;
+        f &= 15;
+        for (int y = 0; y < 16; y++)
+            for (int x = 0; x < 16; x++)
+            {
+                float h = (15 - y) / 15f;                    // 1 at the bottom of the tile
+                int yy = (y + f) & 15;
+                uint hv = H.Hash(x * 7 + 3, yy * 5 + 1, 4242) & 1023;
+                float v = hv / 1023f;
+                float edge = MathF.Abs(x - 7.5f) / 8f;
+                float alive = h * 1.05f - edge * 0.45f + 0.10f - v * 0.75f + (MathF.Sin(x * 0.9f + f * 0.4f) * 0.08f);
+                if (alive <= 0f) { P(T.Fire, x, y, 0, 0, 0, 0); continue; }
+                float t = Math.Clamp(alive * 1.6f, 0f, 1f);
+                float r = 255, g = H.Lerp(60, 235, t), b = H.Lerp(10, 90, t * t);
+                P(T.Fire, x, y, r, g, b, 255);
+            }
     }
 
     /// <summary>Tileable cloud mask. White, alpha 0/255. One texel = 12 blocks.</summary>
