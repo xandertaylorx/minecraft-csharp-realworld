@@ -166,6 +166,7 @@ public sealed class World
         byte b = GetBlock(x, y, z);
         if (b == Blk.Air) return;
         if (Blk.Cross[b]) { if (!Blk.Solid[GetBlock(x, y - 1, z)]) SetBlock(x, y, z, Blk.Air); }
+        else if (b == Blk.Fire) { if (!CanFireStay(x, y, z)) SetBlock(x, y, z, Blk.Air, false); }
         else if (Blk.TorchT[b])
         {
             SupportOf(b, x, y, z, out int sx, out int sy, out int sz);
@@ -177,6 +178,9 @@ public sealed class World
     {
         for (int d = 0; d < 6; d++) CheckSupport(x + Dx[d], y + Dy[d], z + Dz[d]);
         if (Blk.WaterT[now]) Schedule(x, y, z, WaterDelay);
+        if (now == Blk.Fire) { if (!fireAge.ContainsKey((x, y, z))) fireAge[(x, y, z)] = 0; Schedule(x, y, z, 30 + rng.Next(10)); }
+        for (int d = 0; d < 6; d++)
+            if (GetBlock(x + Dx[d], y + Dy[d], z + Dz[d]) == Blk.Fire) Schedule(x + Dx[d], y + Dy[d], z + Dz[d], Blk.WaterT[now] ? 2 : 6);
         for (int d = 0; d < 6; d++)
             if (Blk.WaterT[GetBlock(x + Dx[d], y + Dy[d], z + Dz[d])]) Schedule(x + Dx[d], y + Dy[d], z + Dz[d], WaterDelay);
     }
@@ -199,7 +203,88 @@ public sealed class World
             tickQ.Dequeue(); tickSet.Remove(p); n++;
             byte b = GetBlock(p.Item1, p.Item2, p.Item3);
             if (Blk.WaterT[b]) UpdateWater(p.Item1, p.Item2, p.Item3);
+            else if (b == Blk.Fire) UpdateFire(p.Item1, p.Item2, p.Item3);
+            else fireAge.Remove(p);
         }
+    }
+
+    // ------------------------------------------------------------------ fire (flint and steel)
+    readonly Dictionary<(int, int, int), int> fireAge = new();
+    readonly Random rng = new();
+
+    bool AnyFlammableNeighbour(int x, int y, int z)
+    {
+        for (int d = 0; d < 6; d++) if (Blk.Flammable(GetBlock(x + Dx[d], y + Dy[d], z + Dz[d]))) return true;
+        return false;
+    }
+    public bool CanFireStay(int x, int y, int z) => Blk.Solid[GetBlock(x, y - 1, z)] || AnyFlammableNeighbour(x, y, z);
+    public bool TryIgnite(int x, int y, int z)
+    {
+        byte b = GetBlock(x, y, z);
+        if (b != Blk.Air && !Blk.Cross[b]) return false;
+        if (!CanFireStay(x, y, z)) return false;
+        SetBlock(x, y, z, Blk.Fire);
+        return true;
+    }
+
+    void CatchFire(int x, int y, int z, int chance, int age)
+    {
+        byte b = GetBlock(x, y, z);
+        int burn = Blk.BurnOdds[b];
+        if (burn == 0 || rng.Next(chance) >= burn) return;
+        if (rng.Next(age + 10) < 5 && CanFireStayAfterBurn(x, y, z)) { fireAge[(x, y, z)] = Math.Min(15, age + rng.Next(5) / 4); SetBlock(x, y, z, Blk.Fire, false); }
+        else SetBlock(x, y, z, Blk.Air, false);
+    }
+    bool CanFireStayAfterBurn(int x, int y, int z) => true;
+
+    int Encouragement(int x, int y, int z)
+    {
+        if (GetBlock(x, y, z) != Blk.Air) return 0;
+        int best = 0;
+        for (int d = 0; d < 6; d++) best = Math.Max(best, Blk.FlameOdds[GetBlock(x + Dx[d], y + Dy[d], z + Dz[d])]);
+        return best;
+    }
+
+    void UpdateFire(int x, int y, int z)
+    {
+        var key = (x, y, z);
+        // water puts fire out
+        for (int d = 0; d < 6; d++)
+            if (Blk.WaterT[GetBlock(x + Dx[d], y + Dy[d], z + Dz[d])]) { SetBlock(x, y, z, Blk.Air, false); fireAge.Remove(key); return; }
+        fireAge.TryGetValue(key, out int age);
+        bool flamBelow = Blk.Flammable(GetBlock(x, y - 1, z));
+        bool nearFuel = AnyFlammableNeighbour(x, y, z);
+        if (!CanFireStay(x, y, z)) { SetBlock(x, y, z, Blk.Air, false); fireAge.Remove(key); return; }
+        int na = Math.Min(15, age + rng.Next(3) / 2);
+        fireAge[key] = na; age = na;
+        if (!nearFuel)
+        {
+            if (!Blk.Solid[GetBlock(x, y - 1, z)] || age > 3) { SetBlock(x, y, z, Blk.Air, false); fireAge.Remove(key); return; }
+        }
+        else if (age == 15 && rng.Next(4) == 0 && !flamBelow) { SetBlock(x, y, z, Blk.Air, false); fireAge.Remove(key); return; }
+        // burn adjacent fuel
+        CatchFire(x + 1, y, z, 300, age); CatchFire(x - 1, y, z, 300, age);
+        CatchFire(x, y - 1, z, 250, age); CatchFire(x, y + 1, z, 250, age);
+        CatchFire(x, y, z + 1, 300, age); CatchFire(x, y, z - 1, 300, age);
+        // spread to nearby air cells next to fuel
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dy = -1; dy <= 4; dy++)
+                {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    int div = 100;
+                    if (dy > 1) div += (dy - 1) * 100;
+                    int nx = x + dx, ny = y + dy, nz = z + dz;
+                    int enc = Encouragement(nx, ny, nz);
+                    if (enc <= 0) continue;
+                    int odds = (enc + 40 + 14) / (age + 30);
+                    if (odds > 0 && rng.Next(div) <= odds && CanFireStay(nx, ny, nz))
+                    {
+                        fireAge[(nx, ny, nz)] = Math.Min(15, age / 4 + rng.Next(5) / 4);
+                        SetBlock(nx, ny, nz, Blk.Fire, false);
+                    }
+                }
+        if (GetBlock(x, y, z) == Blk.Fire) Schedule(x, y, z, 30 + rng.Next(10));
     }
 
     // ------------------------------------------------------------------ water
@@ -429,6 +514,7 @@ public sealed class World
                 {
                     int em = Blk.Emit[kv.Value];
                     if (em == 0) continue;
+                    if (kv.Value == Blk.Fire) Schedule(wx0 + (kv.Key & 15), kv.Key >> 8, wz0 + ((kv.Key >> 4) & 15), 40 + rng.Next(40));
                     ch.Bl[kv.Key] = (byte)em;
                     qb.Enqueue((wx0 + (kv.Key & 15), kv.Key >> 8, wz0 + ((kv.Key >> 4) & 15)));
                 }

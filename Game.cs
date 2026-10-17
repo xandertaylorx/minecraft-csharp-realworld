@@ -298,6 +298,13 @@ public sealed class Game : GameWindow
         byte id = Hotbar[Selected];
         if (id == Blk.Air) return;
         int px = x + nx, py = y + ny, pz = z + nz;
+        if (id == Blk.FlintSteel)
+        {
+            // light a fire in the cell next to the clicked face (or in place of a plant)
+            if (Blk.Cross[world.GetBlock(x, y, z)]) world.TryIgnite(x, y, z);
+            else world.TryIgnite(px, py, pz);
+            return;
+        }
         if (Blk.Cross[world.GetBlock(x, y, z)]) { px = x; py = y; pz = z; }
         if (!Blk.IsReplaceable(world.GetBlock(px, py, pz))) return;
         if (Blk.TorchT[id])
