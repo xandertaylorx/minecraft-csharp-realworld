@@ -164,12 +164,35 @@ public sealed class Mesher
         }
     }
 
+    static float WaterHeight(byte b) { int l = Blk.WaterLevel(b); return l == 0 ? 8f / 9f : l >= 8 ? 1f : (8 - l) / 9f; }
+
+    /// <summary>Height of the water surface at a vertex, averaged over the four cells touching it (gives sloped flow).</summary>
+    float CornerHeight(int x, int y, int z, int rx, int rz)
+    {
+        float sum = 0, cnt = 0;
+        for (int dz = 0; dz < 2; dz++)
+            for (int dx = 0; dx < 2; dx++)
+            {
+                int cx = x + rx - dx, cz = z + rz - dz;
+                byte b = B[I(cx, y, cz)];
+                if (Blk.WaterT[b])
+                {
+                    if (Blk.WaterT[B[I(cx, y + 1, cz)]]) return 1f;
+                    float wgt = Blk.WaterLevel(b) == 0 ? 10f : 1f;
+                    sum += WaterHeight(b) * wgt; cnt += wgt;
+                }
+                else if (!Blk.Solid[b]) { cnt += 1f; }
+            }
+        return cnt <= 0 ? 8f / 9f : sum / cnt;
+    }
+
     void Water(int x, int y, int z, byte self, Vector3 tint)
     {
         bool aboveWater = Blk.WaterT[B[I(x, y + 1, z)]];
-        float h = aboveWater ? 1f : 8f / 9f;
         int tile = T.Water;
         float u0 = (tile & 15) * TS + Eps, v0 = (tile >> 4) * TS + Eps, sz = TS - 2 * Eps;
+        Span<float> ch = stackalloc float[4];   // corner heights (rx,rz) -> index rx + 2*rz
+        for (int rz = 0; rz < 2; rz++) for (int rx = 0; rx < 2; rx++) ch[rx + 2 * rz] = aboveWater ? 1f : CornerHeight(x, y, z, rx, rz);
         for (int f = 0; f < 6; f++)
         {
             byte nbk = B[I(x + Nrm[f, 0], y + Nrm[f, 1], z + Nrm[f, 2])];
@@ -182,12 +205,13 @@ public sealed class Mesher
             float blkL = Math.Max(BL[I(x, y, z)], BL[I(fx, fy, fz)]) / 15f;
             for (int k = 0; k < 4; k++)
             {
-                float oy = Org[f, 1] + CU[k] * Uax[f, 1] + CV[k] * Vax[f, 1];
-                float px = x + Org[f, 0] + CU[k] * Uax[f, 0] + CV[k] * Vax[f, 0];
-                float pz = z + Org[f, 2] + CU[k] * Uax[f, 2] + CV[k] * Vax[f, 2];
-                float py = y + (oy >= 1f ? h : oy);
-                float vtex = (f == 2 || f == 3) ? (1 - CV[k]) : (1 - CV[k] * h);
-                Vtx(ref wv, ref wn, px, py, pz, u0 + CU[k] * sz, v0 + vtex * sz, FaceShade[f], light, blkL, tint);
+                int rx = Org[f, 0] + CU[k] * Uax[f, 0] + CV[k] * Vax[f, 0];
+                int ry = Org[f, 1] + CU[k] * Uax[f, 1] + CV[k] * Vax[f, 1];
+                int rz2 = Org[f, 2] + CU[k] * Uax[f, 2] + CV[k] * Vax[f, 2];
+                float hh = ch[rx + 2 * rz2];
+                float py = y + (ry >= 1 ? hh : 0f);
+                float vtex = (f == 2 || f == 3) ? (1 - CV[k]) : (1 - CV[k] * (ry >= 1 ? hh : 1f));
+                Vtx(ref wv, ref wn, x + rx, py, z + rz2, u0 + CU[k] * sz, v0 + vtex * sz, FaceShade[f], light, blkL, tint);
             }
             wq++;
         }

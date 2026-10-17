@@ -50,6 +50,7 @@ public sealed class Player
         else if (InWater)
         {
             MoveRelative(s, f, 0.02f);
+            ApplyFlow(w);
             Move(w, MX, MY, MZ);
             MX *= 0.8; MY *= 0.8; MZ *= 0.8;
             MY -= 0.02;
@@ -83,6 +84,38 @@ public sealed class Player
         if (!OnGround || Flying) sp = 0f;
         BobAmt += (sp - BobAmt) * 0.4f;
         if (Y < -80) { SetPos(X, 200, Z); }
+    }
+
+    /// <summary>Water current: pushes the player towards thinner water / drops, like vanilla.</summary>
+    void ApplyFlow(World w)
+    {
+        int x0 = (int)Math.Floor(X - HalfW + 0.001), x1 = (int)Math.Floor(X + HalfW - 0.001);
+        int z0 = (int)Math.Floor(Z - HalfW + 0.001), z1 = (int)Math.Floor(Z + HalfW - 0.001);
+        int y0 = (int)Math.Floor(Y + 0.4), y1 = (int)Math.Floor(Y + Height - 0.4);
+        double vx = 0, vy = 0, vz = 0;
+        int[] hx = { 1, -1, 0, 0 }, hz = { 0, 0, 1, -1 };
+        static int Decay(byte b) { int l = Blk.WaterLevel(b); return l >= 8 ? 0 : l; }
+        for (int y = y0; y <= y1; y++)
+            for (int z = z0; z <= z1; z++)
+                for (int x = x0; x <= x1; x++)
+                {
+                    byte b = w.GetBlock(x, y, z);
+                    if (!Blk.WaterT[b]) continue;
+                    int dc = Decay(b);
+                    for (int d = 0; d < 4; d++)
+                    {
+                        byte nb = w.GetBlock(x + hx[d], y, z + hz[d]);
+                        if (Blk.Solid[nb]) continue;
+                        int dn = Blk.WaterT[nb] ? Decay(nb) : 8;
+                        if (!Blk.WaterT[nb] && !Blk.Solid[w.GetBlock(x + hx[d], y - 1, z + hz[d])] == false) { }
+                        int diff = dn - dc;
+                        vx += hx[d] * diff; vz += hz[d] * diff;
+                    }
+                    if (Blk.WaterLevel(b) >= 8) vy -= 6;
+                }
+        double len = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+        if (len < 1e-4) return;
+        MX += vx / len * 0.014; MY += vy / len * 0.014; MZ += vz / len * 0.014;
     }
 
     void MoveRelative(float s, float f, float accel)

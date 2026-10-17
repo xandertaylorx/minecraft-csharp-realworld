@@ -89,7 +89,7 @@ public sealed class World
         }
     }
 
-    public void SetBlock(int x, int y, int z, byte id)
+    public void SetBlock(int x, int y, int z, byte id, bool urgentMesh = true)
     {
         if (y < 0 || y >= Chunk.Height) return;
         var ch = GC(x >> 4, z >> 4);
@@ -132,7 +132,7 @@ public sealed class World
             EnqueueNeighbours(q, x, y, z);
             SpreadLight(q, false);
         }
-        MarkCell(x, y, z, true);
+        MarkCell(x, y, z, urgentMesh);
         OnBlockChanged(x, y, z, old, id);
     }
 
@@ -176,6 +176,126 @@ public sealed class World
     void OnBlockChanged(int x, int y, int z, byte old, byte now)
     {
         for (int d = 0; d < 6; d++) CheckSupport(x + Dx[d], y + Dy[d], z + Dz[d]);
+        if (Blk.WaterT[now]) Schedule(x, y, z, WaterDelay);
+        for (int d = 0; d < 6; d++)
+            if (Blk.WaterT[GetBlock(x + Dx[d], y + Dy[d], z + Dz[d])]) Schedule(x + Dx[d], y + Dy[d], z + Dz[d], WaterDelay);
+    }
+
+    // ------------------------------------------------------------------ scheduled block ticks (fluids, fire)
+    public const int WaterDelay = 5;
+    readonly PriorityQueue<(int, int, int), long> tickQ = new();
+    readonly HashSet<(int, int, int)> tickSet = new();
+    public void Schedule(int x, int y, int z, int delay)
+    {
+        var p = (x, y, z);
+        if (tickSet.Add(p)) tickQ.Enqueue(p, Time + delay);
+    }
+    public int ScheduledCount => tickQ.Count;
+    public void TickScheduled()
+    {
+        int n = 0;
+        while (n < 700 && tickQ.TryPeek(out var p, out long due) && due <= Time)
+        {
+            tickQ.Dequeue(); tickSet.Remove(p); n++;
+            byte b = GetBlock(p.Item1, p.Item2, p.Item3);
+            if (Blk.WaterT[b]) UpdateWater(p.Item1, p.Item2, p.Item3);
+        }
+    }
+
+    // ------------------------------------------------------------------ water
+    static readonly int[] Hx = { 1, -1, 0, 0 }, Hz = { 0, 0, 1, -1 };
+
+    static bool FlowReplaceable(byte b) => b == Blk.Air || Blk.Cross[b] || Blk.TorchT[b] || b == Blk.Fire;
+    /// <summary>Can water of the given level move into this block?  level 8 = falling.</summary>
+    static bool CanFlowInto(byte b, int level)
+    {
+        if (FlowReplaceable(b)) return true;
+        if (Blk.WaterT[b])
+        {
+            int l = Blk.WaterLevel(b);
+            if (level == 8) return l != 0 && l != 8;   // falling replaces thinner flowing water
+            return l != 0 && l != 8 && l > level;      // sideways only replaces thinner flowing water
+        }
+        return false;
+    }
+
+    void FlowInto(int x, int y, int z, byte id)
+    {
+        SetBlock(x, y, z, id, false);
+    }
+
+    /// <summary>Minecraft's search for the nearest drop: returns the number of steps until a hole (or 1000).</summary>
+    int FlowCost(int x, int y, int z, int depth, int from)
+    {
+        int best = 1000;
+        for (int d = 0; d < 4; d++)
+        {
+            if (from >= 0 && d == (from ^ 1)) continue;
+            int nx = x + Hx[d], nz = z + Hz[d];
+            byte nb = GetBlock(nx, y, nz);
+            if (Blk.Solid[nb] || (Blk.WaterT[nb] && Blk.WaterLevel(nb) == 0)) continue;
+            if (!Blk.Solid[GetBlock(nx, y - 1, nz)]) return depth;
+            if (depth < 4) best = Math.Min(best, FlowCost(nx, y, nz, depth + 1, d));
+        }
+        return best;
+    }
+
+    void UpdateWater(int x, int y, int z)
+    {
+        byte b = GetBlock(x, y, z);
+        if (!Blk.WaterT[b]) return;
+        int level = Blk.WaterLevel(b);
+        if (level != 0)
+        {
+            int nl;
+            if (Blk.WaterT[GetBlock(x, y + 1, z)]) nl = 8;
+            else
+            {
+                int best = 99, sources = 0;
+                for (int d = 0; d < 4; d++)
+                {
+                    byte nb = GetBlock(x + Hx[d], y, z + Hz[d]);
+                    if (!Blk.WaterT[nb]) continue;
+                    int l = Blk.WaterLevel(nb);
+                    if (l == 0) sources++;
+                    int cand;
+                    if (l == 8) cand = Blk.Solid[GetBlock(x + Hx[d], y - 1, z + Hz[d])] ? 1 : 99;   // falling water only feeds sideways once it has landed
+                    else cand = l + 1;
+                    if (cand <= 7 && cand < best) best = cand;
+                }
+                byte below = GetBlock(x, y - 1, z);
+                if (sources >= 2 && (Blk.Solid[below] || (Blk.WaterT[below] && Blk.WaterLevel(below) == 0))) best = 0;   // infinite water
+                nl = best == 99 ? -1 : best;
+            }
+            if (nl < 0) { SetBlock(x, y, z, Blk.Air, false); return; }
+            if (nl != level) { SetBlock(x, y, z, Blk.FlowId(nl), false); return; }
+        }
+        level = Blk.WaterLevel(GetBlock(x, y, z));
+        byte under = GetBlock(x, y - 1, z);
+        if (CanFlowInto(under, 8)) { FlowInto(x, y - 1, z, Blk.Falling); return; }
+        if (level == 0 || Blk.Solid[under])
+        {
+            int next = (level == 8 || level == 0) ? 1 : level + 1;
+            if (next > 7) return;
+            // choose the direction(s) with the shortest path to a drop
+            Span<int> cost = stackalloc int[4];
+            int min = 2000;
+            for (int d = 0; d < 4; d++)
+            {
+                cost[d] = 2000;
+                int nx = x + Hx[d], nz = z + Hz[d];
+                byte nb = GetBlock(nx, y, nz);
+                if (Blk.Solid[nb] || (Blk.WaterT[nb] && Blk.WaterLevel(nb) == 0)) continue;
+                cost[d] = !Blk.Solid[GetBlock(nx, y - 1, nz)] ? 0 : FlowCost(nx, y, nz, 1, d);
+                if (cost[d] < min) min = cost[d];
+            }
+            for (int d = 0; d < 4; d++)
+            {
+                if (cost[d] != min) continue;
+                int nx = x + Hx[d], nz = z + Hz[d];
+                if (CanFlowInto(GetBlock(nx, y, nz), next)) FlowInto(nx, y, nz, Blk.FlowId(next));
+            }
+        }
     }
 
     // ------------------------------------------------------------------ lighting

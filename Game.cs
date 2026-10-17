@@ -37,7 +37,7 @@ public sealed class Game : GameWindow
     // --shot mode
     readonly string[] args;
     string shotPath, shotScene = "title", shotScreen; int shotDelay = 40; int shotFrames; bool shotPlaced;
-    readonly List<(int, int, int, byte)> shotSets = new(); double[] shotPos; float[] shotRot; long shotSeed = 1234; long shotTime = -1; bool shotFly;
+    readonly List<(int, int, int, byte)> shotSets = new(); readonly List<int[]> shotFills = new(); double[] shotPos; float[] shotRot; long shotSeed = 1234; long shotTime = -1; bool shotFly;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws, string[] args) : base(gws, nws)
     {
@@ -57,6 +57,7 @@ public sealed class Game : GameWindow
                 case "--pos": shotPos = new[] { double.Parse(args[++i]), double.Parse(args[++i]), double.Parse(args[++i]) }; break;
                 case "--rot": shotRot = new[] { float.Parse(args[++i]), float.Parse(args[++i]) }; break;
                 case "--rd": Settings.RenderDist = int.Parse(args[++i]); break;
+                case "--fill": shotFills.Add(new[] { int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]) }); break;
                 case "--set": shotSets.Add((int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), byte.Parse(args[++i]))); break;
             }
         }
@@ -326,6 +327,7 @@ public sealed class Game : GameWindow
     {
         tickCount++;
         world.Time++;
+        world.TickScheduled();
         var inp = new PlayerInput();
         if (screen == null)
         {
@@ -563,6 +565,10 @@ public sealed class Game : GameWindow
             if (shotPos != null) P.SetPos(shotPos[0], shotPos[1], shotPos[2]);
             if (shotRot != null) { P.Yaw = shotRot[0]; P.Pitch = shotRot[1]; }
             if (shotFly) P.Flying = true;
+            foreach (var f in shotFills)
+                for (int fy = Math.Min(f[1], f[4]); fy <= Math.Max(f[1], f[4]); fy++)
+                    for (int fz = Math.Min(f[2], f[5]); fz <= Math.Max(f[2], f[5]); fz++)
+                        for (int fx = Math.Min(f[0], f[3]); fx <= Math.Max(f[0], f[3]); fx++) world.SetBlock(fx, fy, fz, (byte)f[6]);
             foreach (var (sx, sy, sz, sid) in shotSets) world.SetBlock(sx, sy, sz, sid);
             if (shotScreen != null) ApplyShotScreen();
             return;
