@@ -36,7 +36,7 @@ public sealed class Game : GameWindow
     (int x, int y, int z)? target; int tnx, tny, tnz;
 
     // --shot mode
-    readonly string[] args;
+    readonly string[] args; bool shotLuanti;
     string shotPath, shotScene = "title", shotScreen; int shotDelay = 40; int shotFrames; bool shotPlaced;
     readonly List<(int, int, int, byte)> shotSets = new(); readonly List<int[]> shotFills = new(); double[] shotPos; float[] shotRot; long shotSeed = 1234; long shotTime = -1; bool shotFly;
 
@@ -57,6 +57,7 @@ public sealed class Game : GameWindow
                 case "--debug": showDebug = true; break;
                 case "--pos": shotPos = new[] { double.Parse(args[++i]), double.Parse(args[++i]), double.Parse(args[++i]) }; break;
                 case "--rot": shotRot = new[] { float.Parse(args[++i]), float.Parse(args[++i]) }; break;
+                case "--luanti": shotLuanti = true; break;
                 case "--pack": { var pn = args[++i]; Settings.ResourcePacks.Remove(pn); Settings.ResourcePacks.Add(pn); break; }
                 case "--rd": Settings.RenderDist = int.Parse(args[++i]); break;
                 case "--fill": shotFills.Add(new[] { int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]) }); break;
@@ -71,7 +72,15 @@ public sealed class Game : GameWindow
         base.OnLoad();
         VSync = Settings.VSync ? VSyncMode.On : VSyncMode.Off;
         Console.WriteLine("GL: " + GL.GetString(StringName.Renderer) + " / " + GL.GetString(StringName.Version));
+        if (shotLuanti)
+        {
+            LuantiPack.Start();
+            while (!LuantiPack.Finished) Thread.Sleep(100);
+            Console.WriteLine("Luanti: " + LuantiPack.Status);
+            if (LuantiPack.Success) Settings.ResourcePacks.Insert(0, LuantiPack.PackName);
+        }
         Renderer = new Renderer(); Renderer.Init(Settings.ResourcePacks);
+        Console.WriteLine($"Atlas tile {Renderer.TileSize}px, {Renderer.PackOverrides} pack textures");
         Ui = new UiBatch();
         GL.Enable(EnableCap.Blend);
         GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
