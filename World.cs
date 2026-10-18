@@ -98,6 +98,8 @@ public sealed class World
         byte old = ch.Blocks[i];
         if (old == id) return;
         ch.Blocks[i] = id;
+        if (Blk.Emit[old] > 0) ch.Emitters.Remove(i);
+        if (Blk.Emit[id] > 0) ch.Emitters.Add(i);
         RecordEdit(ch.X, ch.Z, i, id);
         int oldOp = Blk.Opacity[old], newOp = Blk.Opacity[id];
 
@@ -518,6 +520,7 @@ public sealed class World
                     if (em == 0) continue;
                     if (kv.Value == Blk.Fire) Schedule(wx0 + (kv.Key & 15), kv.Key >> 8, wz0 + ((kv.Key >> 4) & 15), 40 + rng.Next(40));
                     ch.Bl[kv.Key] = (byte)em;
+                    ch.Emitters.Add(kv.Key);
                     qb.Enqueue((wx0 + (kv.Key & 15), kv.Key >> 8, wz0 + ((kv.Key >> 4) & 15)));
                 }
         // neighbour edge cells spill light into the new chunk

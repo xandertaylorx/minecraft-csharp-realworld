@@ -142,7 +142,7 @@ public sealed class Mesher
     void Cross(int x, int y, int z, byte b, Vector3 tint, bool fire)
     {
         float light = fire ? 1f : L[I(x, y, z)] / 15f;
-        float blk = fire ? 1f : BL[I(x, y, z)] / 15f;
+        float blk = fire ? 1.5f : BL[I(x, y, z)] / 15f;
         uint h = H.Hash(wx0 + x, wz0 + z, 99);
         float ox = fire ? 0f : ((h & 15) / 15f - .5f) * 0.5f, oz = fire ? 0f : (((h >> 4) & 15) / 15f - .5f) * 0.5f;
         int tile = Blk.Tex[b * 6];
@@ -226,7 +226,7 @@ public sealed class Mesher
         float tx = bx - dx * 0.26f, ty = by + 0.625f, tz = bz - dz * 0.26f;
         const float hw = 0.0625f;
         float sky = L[I(x, y, z)] / 15f;
-        const float blk = 1f;
+        const float blk = 1.5f;   // >1 marks emissive geometry for the shader pipeline
         int tile = T.Torch;
         float tu = (tile & 15) * TS, tv = (tile >> 4) * TS;
         float su0 = tu + 7 * TS / 16f, su1 = tu + 9 * TS / 16f;           // columns 7..8

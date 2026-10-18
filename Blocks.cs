@@ -63,8 +63,8 @@ public static class Blk
         Def(Bedrock, "Bedrock", T.Bedrock, T.Bedrock, T.Bedrock);
         Def(Sand, "Sand", T.Sand, T.Sand, T.Sand);
         Def(Gravel, "Gravel", T.Gravel, T.Gravel, T.Gravel);
-        Def(Water, "Water", T.Water, T.Water, T.Water, false, false, 2, 3);
-        for (byte id = Flow1; id <= Falling; id++) Def(id, "Flowing Water", T.Water, T.Water, T.Water, false, false, 2, 3);
+        Def(Water, "Water", T.Water, T.Water, T.Water, false, false, 1, 3);
+        for (byte id = Flow1; id <= Falling; id++) Def(id, "Flowing Water", T.Water, T.Water, T.Water, false, false, 1, 3);
         for (byte id = Water; id <= Water; id++) WaterT[id] = true;
         for (byte id = Flow1; id <= Falling; id++) WaterT[id] = true;
         Def(Log, "Oak Log", T.LogTop, T.LogTop, T.LogSide);
