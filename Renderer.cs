@@ -15,7 +15,8 @@ public struct Cam
 public struct Atmos
 {
     public Vector3 SunDir, Zenith, Horizon, Fog, Glow, NightTint;
-    public float Day, LightDay, Stars;
+    public Vector3 LightDir, LightColor, AmbSky, AmbGround, Haze;
+    public float Day, LightDay, Stars, SunVis;
 
     public static Atmos Compute(long time, float pt, bool underwater)
     {
@@ -37,25 +38,42 @@ public struct Atmos
         a0.Stars = Math.Clamp(1f - day * 2.4f, 0f, 1f);
         a0.LightDay = H.Lerp(0.22f, 1f, day);
         a0.NightTint = Vector3.Lerp(new Vector3(0.78f, 0.84f, 1.08f), Vector3.One, day);
-        if (underwater)
-        {
-            a0.Fog = new Vector3(0.04f, 0.13f, 0.33f) * (0.25f + 0.75f * day);
-        }
+
+        // shader-pack lighting: warm sun, cool moon, hemispheric sky ambient
+        float sunVis = H.Smooth(-0.06f, 0.2f, s);
+        a0.SunVis = sunVis;
+        var sunCol = Vector3.Lerp(new Vector3(1.0f, 0.50f, 0.22f), new Vector3(1.0f, 0.92f, 0.78f), H.Smooth(0.02f, 0.45f, s)) * 0.80f * sunVis;
+        float moonVis = H.Smooth(-0.06f, 0.2f, -s) * (1f - sunVis);
+        var moonCol = new Vector3(0.32f, 0.42f, 0.72f) * 0.17f * moonVis;
+        if (s > -0.02f) { a0.LightDir = a0.SunDir; a0.LightColor = sunCol; }
+        else { a0.LightDir = -a0.SunDir; a0.LightColor = moonCol; }
+        a0.AmbSky = Vector3.Lerp(new Vector3(0.05f, 0.065f, 0.135f), new Vector3(0.36f, 0.43f, 0.58f), day);
+        a0.AmbSky = Vector3.Lerp(a0.AmbSky, new Vector3(0.50f, 0.38f, 0.42f) * (0.3f + 0.7f * day), g * 0.35f);
+        a0.AmbGround = a0.AmbSky * 0.45f + new Vector3(0.07f, 0.06f, 0.05f) * day;
+        a0.Haze = new Vector3(1.0f, 0.74f, 0.48f) * (0.22f * sunVis * (0.45f + 0.55f * g));
+        if (underwater) a0.Fog = new Vector3(0.05f, 0.18f, 0.40f) * (0.25f + 0.75f * day);
         return a0;
     }
 }
 
 public sealed class Renderer
 {
-    Shader terrain, sky, cloud, line;
-    int atlasTex, cloudTex, ebo, emptyVao, lineVao, lineVbo;
+    Shader terrain, sky, cloud, line, shadowSh, water, bloomSh, post, glow;
+    int atlasTex, cloudTex, ebo, emptyVao, lineVao, lineVbo, glowVao, glowVbo;
     List<Anim> anims = new();
     public int TileSize = 16;
     public int PackOverrides;
     readonly Vector4[] planes = new Vector4[6];
-    public int DrawnSections, DrawnTris;
+    public int DrawnSections, DrawnTris, ShadowDraws;
     public Matrix4 LastView, LastProj;
     public int AtlasTex => atlasTex;
+
+    // render targets
+    int W, H;
+    int sceneFbo, sceneColor, sceneDepth, copyFbo, copyColor, copyDepth;
+    readonly int[] bloomTex = new int[5], bloomFbo = new int[5];
+    readonly int[] bloomW = new int[5], bloomH = new int[5];
+    int shadowFbo, shadowTex, shadowRes;
 
     /// <summary>(Re)builds the block atlas from the given resource packs (highest priority first).</summary>
     public void LoadAtlas(IEnumerable<string> packNames)
@@ -74,102 +92,16 @@ public sealed class Renderer
     {
         LoadAtlas(packNames);
         cloudTex = Gfx.MakeTexture(256, 256, TextureGen.BuildClouds(), false, false, true);
+        terrain = new Shader(Glsl.TerrainVS, Glsl.TerrainFS);
+        water = new Shader(Glsl.TerrainVS, Glsl.WaterFS);
+        sky = new Shader(Glsl.FullscreenVS, Glsl.SkyFS);
+        cloud = new Shader(Glsl.CloudVS, Glsl.CloudFS);
+        line = new Shader(Glsl.LineVS, Glsl.LineFS);
+        shadowSh = new Shader(Glsl.ShadowVS, Glsl.ShadowFS);
+        bloomSh = new Shader(Glsl.FullscreenVS, Glsl.BloomFS);
+        post = new Shader(Glsl.FullscreenVS, Glsl.PostFS);
+        glow = new Shader(Glsl.GlowVS, Glsl.GlowFS);
 
-        terrain = new Shader(@"#version 330 core
-layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV; layout(location=2) in float aShade;
-layout(location=3) in float aSky; layout(location=4) in float aBlk; layout(location=5) in vec3 aTint;
-uniform mat4 uVP; uniform vec3 uOff;
-out vec2 vUV; out float vShade; out float vSky; out float vBlk; out vec3 vTint; out float vDist;
-void main(){ vec3 p = aPos + uOff; gl_Position = uVP*vec4(p,1.0); vUV=aUV; vShade=aShade; vSky=aSky; vBlk=aBlk; vTint=aTint; vDist=length(p); }",
-@"#version 330 core
-in vec2 vUV; in float vShade; in float vSky; in float vBlk; in vec3 vTint; in float vDist;
-uniform sampler2D uTex; uniform float uDay; uniform vec3 uNight; uniform vec3 uFogColor; uniform vec2 uFog; uniform float uWater; uniform float uWaterAlpha;
-out vec4 FragColor;
-void main(){
-  vec4 t = texture(uTex, vUV);
-  if (uWater < 0.5 && t.a < 0.4) discard;
-  float mask = clamp((1.0 - t.a) * 255.0 / 55.0, 0.0, 1.0);
-  vec3 col = t.rgb * mix(vec3(1.0), vTint, mask) * vShade;
-  float sl = clamp(vSky * uDay, 0.0, 1.0);
-  float sb = sl / (4.0 - 3.0 * sl);
-  float bl = clamp(vBlk, 0.0, 1.0);
-  float bb = bl / (4.0 - 3.0 * bl);
-  float b = 0.04 + 0.96 * max(sb, bb);
-  float warm = clamp(bb / (sb + bb + 0.0001), 0.0, 1.0);
-  vec3 lightCol = mix(uNight, vec3(1.0, 0.84, 0.64), warm * smoothstep(0.0, 0.35, bb));
-  col *= b * lightCol;
-  float f = clamp((vDist - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0);
-  col = mix(col, uFogColor, f);
-  FragColor = vec4(col, uWater > 0.5 ? uWaterAlpha : 1.0);
-}");
-
-        sky = new Shader(@"#version 330 core
-out vec2 vNdc;
-void main(){ vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2); vNdc = p*2.0-1.0; gl_Position = vec4(vNdc, 0.9999, 1.0); }",
-@"#version 330 core
-in vec2 vNdc; uniform mat4 uInv; uniform vec3 uSun, uZenith, uHorizon, uGlow; uniform float uStars;
-out vec4 FragColor;
-float hash(vec3 p){ p = fract(p*0.3183099+vec3(0.1,0.2,0.3)); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
-void main(){
-  vec4 w = uInv*vec4(vNdc,1.0,1.0); vec3 d = normalize(w.xyz/w.w);
-  float h = d.y;
-  vec3 col = mix(uHorizon, uZenith, clamp(pow(max(h,0.0),0.42),0.0,1.0));
-  if (h < 0.0) col = mix(uHorizon, uHorizon*0.85, clamp(-h*4.0,0.0,1.0));
-  float sd = max(dot(d,uSun),0.0);
-  col += uGlow * pow(sd,5.0) * exp(-abs(h)*4.0);
-  vec3 up0 = vec3(0.0,0.0,1.0);
-  // sun
-  { float c = dot(d,uSun);
-    if (c > 0.0) {
-      vec3 r = normalize(cross(uSun,up0)); vec3 u = cross(r,uSun);
-      vec3 p = d/c - uSun; vec2 q = vec2(dot(p,r),dot(p,u));
-      float halo = exp(-length(q)*7.0)*0.3; col += vec3(1.0,0.85,0.5)*halo*clamp(uSun.y*3.0+1.0,0.0,1.0);
-      if (abs(q.x) < 0.095 && abs(q.y) < 0.095) col = vec3(1.0,0.98,0.86);
-    } }
-  // moon
-  { vec3 m = -uSun; float c = dot(d,m);
-    if (c > 0.0) {
-      vec3 r = normalize(cross(m,up0)); vec3 u = cross(r,m);
-      vec3 p = d/c - m; vec2 q = vec2(dot(p,r),dot(p,u));
-      if (abs(q.x) < 0.075 && abs(q.y) < 0.075) {
-        float n = hash(vec3(floor(q*55.0),1.0));
-        col = mix(vec3(0.86,0.88,0.95), vec3(0.62,0.65,0.74), step(0.72,n));
-      }
-    } }
-  if (uStars > 0.0 && h > -0.1) {
-    vec3 sp = d*60.0; vec3 cell = floor(sp);
-    float rnd = hash(cell); float st = step(0.9955, rnd);
-    vec3 f = fract(sp)-0.5; st *= smoothstep(0.34,0.1,length(f));
-    col += vec3(st) * uStars * (0.6 + 0.4*hash(cell+7.0));
-  }
-  FragColor = vec4(col,1.0);
-}");
-
-        cloud = new Shader(@"#version 330 core
-uniform vec3 uCamRel; uniform vec2 uUvOff; uniform float uR; uniform mat4 uVP;
-out vec2 vUV; out float vDist;
-void main(){
-  vec2 c = vec2((gl_VertexID & 1)*2-1, ((gl_VertexID>>1)&1)*2-1) * uR;
-  vec3 p = vec3(c.x, uCamRel.y, c.y);
-  gl_Position = uVP*vec4(p,1.0);
-  vUV = uUvOff + c/3072.0; vDist = length(c);
-}",
-@"#version 330 core
-in vec2 vUV; in float vDist; uniform sampler2D uTex; uniform vec3 uColor; uniform vec3 uFogColor; uniform vec2 uFog; uniform float uAlpha;
-out vec4 FragColor;
-void main(){
-  vec4 t = texture(uTex,vUV); if (t.a < 0.5) discard;
-  float f = clamp((vDist-uFog.x)/(uFog.y-uFog.x),0.0,1.0);
-  FragColor = vec4(mix(uColor,uFogColor,f*0.6), uAlpha*(1.0-f));
-}");
-
-        line = new Shader(@"#version 330 core
-layout(location=0) in vec3 aPos; uniform mat4 uVP; uniform vec3 uOff;
-void main(){ gl_Position = uVP*vec4(aPos+uOff,1.0); gl_Position.z -= 0.0004; }",
-@"#version 330 core
-uniform vec4 uColor; out vec4 FragColor; void main(){ FragColor = uColor; }");
-
-        // shared index buffer
         var idx = new uint[Mesher.MaxQuads * 6];
         for (int i = 0; i < Mesher.MaxQuads; i++) { uint b = (uint)(i * 4); idx[i * 6] = b; idx[i * 6 + 1] = b + 1; idx[i * 6 + 2] = b + 2; idx[i * 6 + 3] = b; idx[i * 6 + 4] = b + 2; idx[i * 6 + 5] = b + 3; }
         ebo = GL.GenBuffer();
@@ -182,7 +114,19 @@ uniform vec4 uColor; out vec4 FragColor; void main(){ FragColor = uColor; }");
         GL.BindBuffer(BufferTarget.ArrayBuffer, lineVbo);
         GL.BufferData(BufferTarget.ArrayBuffer, 24 * 3 * 4, IntPtr.Zero, BufferUsageHint.DynamicDraw);
         GL.EnableVertexAttribArray(0); GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 12, 0);
+        // glow sprites
+        glowVao = GL.GenVertexArray(); glowVbo = GL.GenBuffer();
+        GL.BindVertexArray(glowVao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, glowVbo);
+        GL.BufferData(BufferTarget.ArrayBuffer, GlowMax * 4 * GlowStride * 4, IntPtr.Zero, BufferUsageHint.DynamicDraw);
+        int st = GlowStride * 4;
+        GL.EnableVertexAttribArray(0); GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, st, 0);
+        GL.EnableVertexAttribArray(1); GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, st, 12);
+        GL.EnableVertexAttribArray(2); GL.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, st, 20);
+        GL.EnableVertexAttribArray(3); GL.VertexAttribPointer(3, 3, VertexAttribPointerType.Float, false, st, 32);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, ebo);
         GL.BindVertexArray(0);
+        EnsureShadowMap(2);
     }
 
     /// <summary>Advances animated block textures (water, fire, animated pack textures) to the given game tick.</summary>
@@ -200,6 +144,83 @@ uniform vec4 uColor; out vec4 FragColor; void main(){ FragColor = uColor; }");
             GL.TexSubImage2D(TextureTarget.Texture2D, 0, (a.Tile & 15) * TileSize, (a.Tile >> 4) * TileSize, TileSize, TileSize, PixelFormat.Rgba, PixelType.UnsignedByte, a.Frames[frame]);
         }
         if (any) GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
+    }
+
+    // ------------------------------------------------------------------ render targets
+    static int ColorTex(int w, int h)
+    {
+        int t = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, t);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba16f, w, h, 0, PixelFormat.Rgba, PixelType.HalfFloat, IntPtr.Zero);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        return t;
+    }
+    static int DepthTex(int w, int h)
+    {
+        int t = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, t);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.DepthComponent24, w, h, 0, PixelFormat.DepthComponent, PixelType.Float, IntPtr.Zero);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        return t;
+    }
+    static int MakeFbo(int color, int depth)
+    {
+        int f = GL.GenFramebuffer();
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, f);
+        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, color, 0);
+        if (depth != 0) GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, TextureTarget.Texture2D, depth, 0);
+        var st = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        if (st != FramebufferErrorCode.FramebufferComplete) Console.Error.WriteLine("FBO incomplete: " + st);
+        return f;
+    }
+
+    void EnsureTargets(int w, int h)
+    {
+        if (w == W && h == H && sceneFbo != 0) return;
+        W = w; H = h;
+        if (sceneFbo != 0)
+        {
+            GL.DeleteFramebuffer(sceneFbo); GL.DeleteFramebuffer(copyFbo);
+            GL.DeleteTexture(sceneColor); GL.DeleteTexture(sceneDepth); GL.DeleteTexture(copyColor); GL.DeleteTexture(copyDepth);
+            for (int i = 0; i < 5; i++) { GL.DeleteFramebuffer(bloomFbo[i]); GL.DeleteTexture(bloomTex[i]); }
+        }
+        sceneColor = ColorTex(w, h); sceneDepth = DepthTex(w, h); sceneFbo = MakeFbo(sceneColor, sceneDepth);
+        copyColor = ColorTex(w, h); copyDepth = DepthTex(w, h); copyFbo = MakeFbo(copyColor, copyDepth);
+        for (int i = 0; i < 5; i++)
+        {
+            bloomW[i] = Math.Max(1, w >> (i + 1)); bloomH[i] = Math.Max(1, h >> (i + 1));
+            bloomTex[i] = ColorTex(bloomW[i], bloomH[i]); bloomFbo[i] = MakeFbo(bloomTex[i], 0);
+        }
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+    }
+
+    void EnsureShadowMap(int quality)
+    {
+        int res = quality <= 0 ? 4 : quality == 1 ? 2048 : 4096;
+        if (res == shadowRes && shadowFbo != 0) return;
+        if (shadowFbo != 0) { GL.DeleteFramebuffer(shadowFbo); GL.DeleteTexture(shadowTex); }
+        shadowRes = res;
+        shadowTex = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, shadowTex);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.DepthComponent24, res, res, 0, PixelFormat.DepthComponent, PixelType.Float, IntPtr.Zero);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToBorder);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToBorder);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureBorderColor, new float[] { 1f, 1f, 1f, 1f });
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureCompareMode, (int)TextureCompareMode.CompareRefToTexture);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureCompareFunc, (int)All.Lequal);
+        shadowFbo = GL.GenFramebuffer();
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, shadowFbo);
+        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, TextureTarget.Texture2D, shadowTex, 0);
+        GL.DrawBuffer(DrawBufferMode.None); GL.ReadBuffer(ReadBufferMode.None);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 
     public Matrix4 BuildView(in Cam c)
@@ -228,31 +249,98 @@ uniform vec4 uColor; out vec4 FragColor; void main(){ FragColor = uColor; }");
         }
         return true;
     }
+    static Vector4 Project(Vector3 v, Matrix4 m) => new(
+        v.X * m.M11 + v.Y * m.M21 + v.Z * m.M31 + m.M41, v.X * m.M12 + v.Y * m.M22 + v.Z * m.M32 + m.M42,
+        v.X * m.M13 + v.Y * m.M23 + v.Z * m.M33 + m.M43, v.X * m.M14 + v.Y * m.M24 + v.Z * m.M34 + m.M44);
 
     struct WaterDraw { public float D; public GpuMesh M; public Vector3 Off; }
     readonly List<WaterDraw> waterList = new();
 
-    public void RenderWorld(World w, in Cam cam, int rd, in Atmos at, bool underwater, float partial, (int x, int y, int z)? selected, bool clouds, long time)
+    // ------------------------------------------------------------------ glow sprites (torches / fire)
+    const int GlowMax = 600, GlowStride = 11;
+    readonly float[] glowData = new float[GlowMax * 4 * GlowStride];
+
+    int BuildGlow(World w, in Cam cam, Matrix4 view)
     {
+        int n = 0;
+        int pcx = World.FloorDiv16(cam.Pos.X), pcz = World.FloorDiv16(cam.Pos.Z);
+        float maxD2 = 56f * 56f;
+        for (int dz = -4; dz <= 4; dz++)
+            for (int dx = -4; dx <= 4; dx++)
+            {
+                if (!w.Chunks.TryGetValue(World.Key(pcx + dx, pcz + dz), out var ch) || ch.Emitters.Count == 0) continue;
+                foreach (int idx in ch.Emitters)
+                {
+                    if (n >= GlowMax) return n;
+                    int lx = idx & 15, lz = (idx >> 4) & 15, ly = idx >> 8;
+                    byte id = ch.Blocks[idx];
+                    float cx, cy, cz, size, inten; Vector3 col;
+                    if (id == Blk.Fire) { cx = lx + 0.5f; cy = ly + 0.55f; cz = lz + 0.5f; size = 2.1f; inten = 0.65f; col = new Vector3(1.0f, 0.42f, 0.10f); }
+                    else if (Blk.TorchT[id])
+                    {
+                        int tdx = id == Blk.TorchPX ? 1 : id == Blk.TorchNX ? -1 : 0, tdz = id == Blk.TorchPZ ? 1 : id == Blk.TorchNZ ? -1 : 0;
+                        bool wall = id != Blk.TorchFloor;
+                        cx = lx + 0.5f + tdx * 0.08f; cy = ly + (wall ? 0.22f : 0f) + 0.70f; cz = lz + 0.5f + tdz * 0.08f;
+                        size = 1.45f; inten = 0.80f; col = new Vector3(1.0f, 0.52f, 0.18f);
+                    }
+                    else continue;
+                    float rx = (float)(ch.X * 16 + cx - cam.Pos.X), ry = (float)(cy - cam.Pos.Y), rz = (float)(ch.Z * 16 + cz - cam.Pos.Z);
+                    if (rx * rx + ry * ry + rz * rz > maxD2) continue;
+                    float phase = (idx * 0.37f + ch.X * 1.3f + ch.Z * 2.1f);
+                    int o = n * 4 * GlowStride;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        float cxn = (k == 1 || k == 2) ? 1f : -1f, cyn = k >= 2 ? 1f : -1f;
+                        int oo = o + k * GlowStride;
+                        glowData[oo] = rx; glowData[oo + 1] = ry; glowData[oo + 2] = rz;
+                        glowData[oo + 3] = cxn; glowData[oo + 4] = cyn;
+                        glowData[oo + 5] = size; glowData[oo + 6] = inten; glowData[oo + 7] = phase;
+                        glowData[oo + 8] = col.X; glowData[oo + 9] = col.Y; glowData[oo + 10] = col.Z;
+                    }
+                    n++;
+                }
+            }
+        return n;
+    }
+
+    // ------------------------------------------------------------------ main entry
+    public void RenderWorld(World w, in Cam cam, int rd, in Atmos at, bool underwater, float partial, (int x, int y, int z)? selected,
+                            bool clouds, long time, Settings st, int fbW, int fbH, double seconds)
+    {
+        EnsureTargets(fbW, fbH);
+        bool sh = st.Shaders;
+        int shadowQ = sh ? st.ShadowQuality : 0;
+        if (shadowQ > 0) EnsureShadowMap(shadowQ);
         float far = Math.Max(rd * 16f * 2f, 300f);
-        var proj = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(cam.Fov), cam.Aspect, 0.05f, far);
+        const float near = 0.05f;
+        var proj = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(cam.Fov), cam.Aspect, near, far);
         var view = BuildView(cam);
         var vp = view * proj;
         LastView = view; LastProj = proj;
         ExtractPlanes(vp);
+        float flicker = 1f + 0.045f * MathF.Sin((float)seconds * 11.3f) + 0.03f * MathF.Sin((float)seconds * 23.7f + 1.3f) + 0.02f * MathF.Sin((float)seconds * 5.1f);
+        float camX = (float)(cam.Pos.X % 4096.0), camZ = (float)(cam.Pos.Z % 4096.0);
 
+        // ---- 1. sun shadow map
+        bool doShadow = shadowQ > 0 && at.LightColor.LengthSquared > 0.0004f;
+        Matrix4 lightVP = Matrix4.Identity;
+        float shadowTexel = 1f / Math.Max(1, shadowRes);
+        ShadowDraws = 0;
+        if (doShadow) lightVP = RenderShadows(w, cam, at, shadowQ);
+
+        // ---- 2. scene (HDR)
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, sceneFbo);
+        GL.Viewport(0, 0, W, H);
         GL.ClearColor(at.Fog.X, at.Fog.Y, at.Fog.Z, 1f);
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
         GL.Disable(EnableCap.Blend);
         GL.Disable(EnableCap.CullFace);
 
-        // sky
         if (!underwater)
         {
             GL.Disable(EnableCap.DepthTest);
             sky.Use();
-            var inv = Matrix4.Invert(vp);
-            sky.Set("uInv", inv);
+            sky.Set("uInv", Matrix4.Invert(vp));
             sky.Set("uSun", at.SunDir); sky.Set("uZenith", at.Zenith); sky.Set("uHorizon", at.Horizon);
             sky.Set("uGlow", at.Glow); sky.Set("uStars", at.Stars);
             GL.BindVertexArray(emptyVao);
@@ -275,7 +363,18 @@ uniform vec4 uColor; out vec4 FragColor; void main(){ FragColor = uColor; }");
         terrain.Set("uFog", fogStart, fogEnd);
         terrain.Set("uWater", 0f);
         terrain.Set("uWaterAlpha", 1f);
+        terrain.Set("uShaders", sh ? 1 : 0);
+        terrain.Set("uUnder", underwater ? 1 : 0);
+        terrain.Set("uShadowOn", doShadow ? 1 : 0);
+        terrain.Set("uLightVP", lightVP);
+        terrain.Set("uShadowTexel", shadowTexel);
+        terrain.Set("uLightDir", at.LightDir); terrain.Set("uLightColor", at.LightColor);
+        terrain.Set("uAmbSky", at.AmbSky); terrain.Set("uAmbGround", at.AmbGround); terrain.Set("uHaze", at.Haze);
+        terrain.Set("uFlicker", flicker); terrain.Set("uTime", (float)seconds); terrain.Set("uCamXZ", camX, camZ);
         terrain.Set("uTex", 0);
+        terrain.Set("uShadow", 1);
+        GL.ActiveTexture(TextureUnit.Texture1);
+        GL.BindTexture(TextureTarget.Texture2D, shadowTex);
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.BindTexture(TextureTarget.Texture2D, atlasTex);
 
@@ -332,35 +431,77 @@ uniform vec4 uColor; out vec4 FragColor; void main(){ FragColor = uColor; }");
             GL.BindBuffer(BufferTarget.ArrayBuffer, lineVbo);
             GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, v.Length * 4, v);
             GL.LineWidth(1f);
-            line.Set("uColor", 0f, 0f, 0f);
             GL.Uniform4(line.U("uColor"), 0f, 0f, 0f, 0.55f);
             GL.DrawArrays(PrimitiveType.Lines, 0, 24);
+            GL.Disable(EnableCap.Blend);
         }
 
-        // water (back to front)
+        // ---- 3. water
+        if (waterList.Count > 0)
+        {
+            GL.Disable(EnableCap.CullFace);
+            if (sh)
+            {
+                // copy the opaque scene so the water shader can refract and reflect it
+                GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, sceneFbo);
+                GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, copyFbo);
+                GL.BlitFramebuffer(0, 0, W, H, 0, 0, W, H, ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit, BlitFramebufferFilter.Nearest);
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, sceneFbo);
+                water.Use();
+                water.Set("uVP", vp); water.Set("uView", view); water.Set("uProj", proj);
+                water.Set("uScreen", W, H); water.Set("uNear", near); water.Set("uFar", far);
+                water.Set("uTime", (float)seconds); water.Set("uCamXZ", camX, camZ);
+                water.Set("uLightDir", at.LightDir); water.Set("uLightColor", at.LightColor);
+                water.Set("uAmbSky", at.AmbSky); water.Set("uHaze", at.Haze);
+                water.Set("uFogColor", at.Fog); water.Set("uFog", fogStart, fogEnd);
+                water.Set("uUnder", underwater ? 1 : 0); water.Set("uReflect", st.Reflections ? 1 : 0); water.Set("uFlicker", flicker);
+                water.Set("uSun", at.SunDir); water.Set("uZenith", at.Zenith); water.Set("uHorizon", at.Horizon);
+                water.Set("uGlow", at.Glow); water.Set("uStars", at.Stars);
+                water.Set("uSceneColor", 0); water.Set("uSceneDepth", 1);
+                GL.ActiveTexture(TextureUnit.Texture1); GL.BindTexture(TextureTarget.Texture2D, copyDepth);
+                GL.ActiveTexture(TextureUnit.Texture0); GL.BindTexture(TextureTarget.Texture2D, copyColor);
+                int wOff = water.U("uOff");
+                GL.DepthMask(true);
+                foreach (var wd in waterList)
+                {
+                    GL.Uniform3(wOff, wd.Off.X, wd.Off.Y, wd.Off.Z);
+                    GL.BindVertexArray(wd.M.Vao);
+                    GL.DrawElements(PrimitiveType.Triangles, wd.M.IndexCount, DrawElementsType.UnsignedInt, 0);
+                    DrawnTris += wd.M.IndexCount / 3;
+                }
+            }
+            else
+            {
+                GL.Enable(EnableCap.Blend);
+                GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                GL.DepthMask(false);
+                terrain.Use();
+                terrain.Set("uWater", 1f);
+                terrain.Set("uWaterAlpha", 0.72f);
+                GL.ActiveTexture(TextureUnit.Texture0); GL.BindTexture(TextureTarget.Texture2D, atlasTex);
+                waterList.Sort((p, q) => q.D.CompareTo(p.D));
+                foreach (var wd in waterList)
+                {
+                    GL.Uniform3(offLoc, wd.Off.X, wd.Off.Y, wd.Off.Z);
+                    GL.BindVertexArray(wd.M.Vao);
+                    GL.DrawElements(PrimitiveType.Triangles, wd.M.IndexCount, DrawElementsType.UnsignedInt, 0);
+                    DrawnTris += wd.M.IndexCount / 3;
+                }
+                GL.DepthMask(true);
+                GL.Disable(EnableCap.Blend);
+            }
+        }
+
+        // ---- 4. clouds + glow sprites (blended into the HDR buffer)
         GL.Enable(EnableCap.Blend);
         GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-        GL.Disable(EnableCap.CullFace);
         GL.DepthMask(false);
-        terrain.Use();
-        terrain.Set("uWater", 1f);
-        terrain.Set("uWaterAlpha", 0.72f);
-        waterList.Sort((p, q) => q.D.CompareTo(p.D));
-        foreach (var wd in waterList)
-        {
-            GL.Uniform3(offLoc, wd.Off.X, wd.Off.Y, wd.Off.Z);
-            GL.BindVertexArray(wd.M.Vao);
-            GL.DrawElements(PrimitiveType.Triangles, wd.M.IndexCount, DrawElementsType.UnsignedInt, 0);
-            DrawnTris += wd.M.IndexCount / 3;
-        }
-
-        // clouds
+        GL.Disable(EnableCap.CullFace);
         if (clouds && !underwater)
         {
             cloud.Use();
             cloud.Set("uVP", vp);
             cloud.Set("uR", 700f);
-            float scroll = (float)((time + partial) * 0.03 / 12.0); // texels
             float uo = (float)(((cam.Pos.X + (time + partial) * 0.03) / 3072.0) % 1.0), vo = (float)((cam.Pos.Z / 3072.0) % 1.0);
             cloud.Set("uUvOff", uo, vo);
             cloud.Set("uFogColor", at.Fog);
@@ -377,9 +518,150 @@ uniform vec4 uColor; out vec4 FragColor; void main(){ FragColor = uColor; }");
             cloud.Set("uCamRel", 0f, cyBase + 4f - camY, 0f); cloud.Set("uColor", lit); GL.Uniform1(cloud.U("uAlpha"), 0.85f);
             GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
         }
+        if (sh)
+        {
+            int gn = BuildGlow(w, cam, view);
+            if (gn > 0)
+            {
+                GL.BlendFunc(BlendingFactor.One, BlendingFactor.One);
+                glow.Use();
+                glow.Set("uVP", vp);
+                glow.Set("uRight", view.M11, view.M21, view.M31);
+                glow.Set("uUp", view.M12, view.M22, view.M32);
+                glow.Set("uTime", (float)seconds);
+                GL.BindVertexArray(glowVao);
+                GL.BindBuffer(BufferTarget.ArrayBuffer, glowVbo);
+                GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, gn * 4 * GlowStride * 4, glowData);
+                GL.DrawElements(PrimitiveType.Triangles, gn * 6, DrawElementsType.UnsignedInt, 0);
+            }
+        }
         GL.DepthMask(true);
         GL.Disable(EnableCap.Blend);
-        GL.Enable(EnableCap.CullFace);
+
+        // ---- 5. bloom + composite to the window
+        GL.Disable(EnableCap.DepthTest);
+        GL.BindVertexArray(emptyVao);
+        bool bloomOn = sh && st.Bloom;
+        if (bloomOn) RunBloom();
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        GL.Viewport(0, 0, W, H);
+        post.Use();
+        post.Set("uScene", 0); post.Set("uBloom", 1); post.Set("uDepth", 2);
+        post.Set("uShaders", sh ? 1 : 0); post.Set("uBloomOn", bloomOn ? 1 : 0); post.Set("uBloomI", 0.38f); post.Set("uUnder", underwater ? 1 : 0);
+        post.Set("uScreen", W, H);
+        // god rays
+        var sv = new Vector3(at.SunDir.X * view.M11 + at.SunDir.Y * view.M21 + at.SunDir.Z * view.M31,
+                             at.SunDir.X * view.M12 + at.SunDir.Y * view.M22 + at.SunDir.Z * view.M32,
+                             at.SunDir.X * view.M13 + at.SunDir.Y * view.M23 + at.SunDir.Z * view.M33);
+        float rays = 0f; Vector2 sunUV = new(0.5f, 0.5f);
+        var clip = Project(sv * 100f, proj);
+        if (sh && !underwater && clip.W > 0.01f && at.SunVis > 0.02f)
+        {
+            sunUV = new Vector2(clip.X / clip.W * 0.5f + 0.5f, clip.Y / clip.W * 0.5f + 0.5f);
+            var svn = sv.Normalized();
+            float facing = Math.Clamp(-svn.Z, 0f, 1f);
+            rays = 0.20f * at.SunVis * facing * facing * (0.5f + 0.5f * at.Day);
+        }
+        post.Set("uSunUV", sunUV.X, sunUV.Y); post.Set("uSunRays", rays); post.Set("uSunTint", 1.0f, 0.82f, 0.55f);
+        GL.ActiveTexture(TextureUnit.Texture2); GL.BindTexture(TextureTarget.Texture2D, sceneDepth);
+        GL.ActiveTexture(TextureUnit.Texture1); GL.BindTexture(TextureTarget.Texture2D, bloomTex[0]);
+        GL.ActiveTexture(TextureUnit.Texture0); GL.BindTexture(TextureTarget.Texture2D, sceneColor);
+        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
         GL.BindVertexArray(0);
+        GL.Enable(EnableCap.CullFace);
+    }
+
+    // ------------------------------------------------------------------ passes
+    void FullPass(int dstFbo, int dstW, int dstH)
+    {
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, dstFbo);
+        GL.Viewport(0, 0, dstW, dstH);
+        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
+    }
+
+    void RunBloom()
+    {
+        bloomSh.Use();
+        bloomSh.Set("uTex", 0);
+        GL.ActiveTexture(TextureUnit.Texture0);
+        GL.Disable(EnableCap.Blend);
+        bloomSh.Set("uMode", 0); bloomSh.Set("uThreshold", 1.0f); bloomSh.Set("uTexel", 1f / W, 1f / H);
+        GL.BindTexture(TextureTarget.Texture2D, sceneColor);
+        FullPass(bloomFbo[0], bloomW[0], bloomH[0]);
+        bloomSh.Set("uMode", 1);
+        for (int i = 1; i < 5; i++)
+        {
+            bloomSh.Set("uTexel", 1f / bloomW[i - 1], 1f / bloomH[i - 1]);
+            GL.BindTexture(TextureTarget.Texture2D, bloomTex[i - 1]);
+            FullPass(bloomFbo[i], bloomW[i], bloomH[i]);
+        }
+        GL.Enable(EnableCap.Blend);
+        GL.BlendFunc(BlendingFactor.One, BlendingFactor.One);
+        bloomSh.Set("uMode", 2);
+        for (int i = 4; i >= 1; i--)
+        {
+            bloomSh.Set("uTexel", 1f / bloomW[i], 1f / bloomH[i]);
+            GL.BindTexture(TextureTarget.Texture2D, bloomTex[i]);
+            FullPass(bloomFbo[i - 1], bloomW[i - 1], bloomH[i - 1]);
+        }
+        GL.Disable(EnableCap.Blend);
+    }
+
+    Matrix4 RenderShadows(World w, in Cam cam, in Atmos at, int quality)
+    {
+        float radius = quality == 1 ? 40f : 56f;
+        var L = at.LightDir;
+        var f = -L;                                              // direction the light travels
+        var upRef = MathF.Abs(L.Y) > 0.95f ? Vector3.UnitZ : Vector3.UnitY;
+        var r = Vector3.Normalize(Vector3.Cross(f, upRef));
+        var u = Vector3.Cross(r, f);
+        // snap the shadow volume to whole shadow-map texels (in light space) so shadows do not shimmer while moving
+        double texel = 2.0 * radius / shadowRes;
+        double cr = cam.Pos.X * r.X + cam.Pos.Y * r.Y + cam.Pos.Z * r.Z, cu = cam.Pos.X * u.X + cam.Pos.Y * u.Y + cam.Pos.Z * u.Z;
+        float dr = (float)(Math.Floor(cr / texel) * texel - cr), du = (float)(Math.Floor(cu / texel) * texel - cu);
+        var center = r * dr + u * du;
+        float dist = radius * 2.2f;
+        var lv = Matrix4.LookAt(center + L * dist, center, upRef);
+        var lp = Matrix4.CreateOrthographicOffCenter(-radius, radius, -radius, radius, 0.1f, dist + radius * 1.5f);
+        var lvp = lv * lp;
+
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, shadowFbo);
+        GL.Viewport(0, 0, shadowRes, shadowRes);
+        GL.Clear(ClearBufferMask.DepthBufferBit);
+        GL.Enable(EnableCap.DepthTest); GL.DepthMask(true);
+        GL.Disable(EnableCap.CullFace);
+        GL.Enable(EnableCap.DepthClamp);
+        GL.Enable(EnableCap.PolygonOffsetFill);
+        GL.PolygonOffset(2.0f, 4.0f);
+        shadowSh.Use();
+        shadowSh.Set("uLightVP", lvp);
+        shadowSh.Set("uTex", 0);
+        GL.ActiveTexture(TextureUnit.Texture0);
+        GL.BindTexture(TextureTarget.Texture2D, atlasTex);
+        int offLoc = shadowSh.U("uOff");
+        float reach = radius * 1.75f;
+        int pcx = World.FloorDiv16(cam.Pos.X), pcz = World.FloorDiv16(cam.Pos.Z);
+        int cr2 = (int)Math.Ceiling(reach / 16f) + 1;
+        for (int dz = -cr2; dz <= cr2; dz++)
+            for (int dx = -cr2; dx <= cr2; dx++)
+            {
+                if (!w.Chunks.TryGetValue(World.Key(pcx + dx, pcz + dz), out var ch)) continue;
+                float ox = (float)(ch.X * 16 - cam.Pos.X), oz = (float)(ch.Z * 16 - cam.Pos.Z);
+                for (int sy = 0; sy < Chunk.Sections; sy++)
+                {
+                    var mo = ch.Opaque[sy];
+                    if (mo == null) continue;
+                    float oy = (float)(sy * 16 - cam.Pos.Y);
+                    float cx = ox + 8, cy = oy + 8, cz = oz + 8;
+                    if (cx * cx + cy * cy + cz * cz > (reach + 14f) * (reach + 14f)) continue;
+                    GL.Uniform3(offLoc, ox, oy, oz);
+                    GL.BindVertexArray(mo.Vao);
+                    GL.DrawElements(PrimitiveType.Triangles, mo.IndexCount, DrawElementsType.UnsignedInt, 0);
+                    ShadowDraws++;
+                }
+            }
+        GL.Disable(EnableCap.PolygonOffsetFill);
+        GL.Disable(EnableCap.DepthClamp);
+        return lvp;
     }
 }
