@@ -25,6 +25,7 @@ public sealed class Game : GameWindow
     double lastT, acc, fpsAcc; int fpsFrames; float fps;
     float guiScale = 1, dpi = 1; int guiW = 320, guiH = 240, lastGuiW, lastGuiH;
     bool showDebug, hideHud;
+    public int MouseGuiX => mouseGui_x;
     int mouseGui_x, mouseGui_y; Vector2 mouseLogical;
     bool leftDown, rightDown; int breakCd, placeCd;
     long tickCount, lastSpaceTick = -100, lastWTick = -100;
@@ -56,6 +57,7 @@ public sealed class Game : GameWindow
                 case "--debug": showDebug = true; break;
                 case "--pos": shotPos = new[] { double.Parse(args[++i]), double.Parse(args[++i]), double.Parse(args[++i]) }; break;
                 case "--rot": shotRot = new[] { float.Parse(args[++i]), float.Parse(args[++i]) }; break;
+                case "--pack": { var pn = args[++i]; Settings.ResourcePacks.Remove(pn); Settings.ResourcePacks.Add(pn); break; }
                 case "--rd": Settings.RenderDist = int.Parse(args[++i]); break;
                 case "--fill": shotFills.Add(new[] { int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]) }); break;
                 case "--set": shotSets.Add((int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), byte.Parse(args[++i]))); break;
@@ -69,7 +71,7 @@ public sealed class Game : GameWindow
         base.OnLoad();
         VSync = Settings.VSync ? VSyncMode.On : VSyncMode.Off;
         Console.WriteLine("GL: " + GL.GetString(StringName.Renderer) + " / " + GL.GetString(StringName.Version));
-        Renderer = new Renderer(); Renderer.Init();
+        Renderer = new Renderer(); Renderer.Init(Settings.ResourcePacks);
         Ui = new UiBatch();
         GL.Enable(EnableCap.Blend);
         GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
@@ -93,6 +95,7 @@ public sealed class Game : GameWindow
         if (inGame && world != null && info != null) SaveIO.Save(info, world, P, Hotbar, Selected);
     }
 
+    public void ReloadResources() { Renderer.LoadAtlas(Settings.ResourcePacks); }
     public void ApplySettings() { VSync = Settings.VSync ? VSyncMode.On : VSyncMode.Off; }
     public void ToggleFullscreen() { WindowState = WindowState == WindowState.Fullscreen ? WindowState.Normal : WindowState.Fullscreen; }
 
@@ -354,7 +357,7 @@ public sealed class Game : GameWindow
         float tgt = P.Sprinting ? 1.12f : 1f;
         fovMod += (tgt - fovMod) * 0.5f;
         if (ignoreMouse > 0) ignoreMouse--;
-        Renderer.AnimateWater((int)(world.Time / 2));
+        Renderer.Animate(world.Time);
     }
 
     Cam MakeCam(float pt)
@@ -416,7 +419,7 @@ public sealed class Game : GameWindow
             pano.Time = 1800;
             int rd = Math.Min(8, Settings.RenderDist);
             pano.Update(cam.Pos.X, cam.Pos.Y, cam.Pos.Z, rd);
-            Renderer.AnimateWater((int)(Time * 8));
+            Renderer.Animate((long)(Time * 20));
             var at = Atmos.Compute(1800, 0, false);
             Renderer.RenderWorld(pano, cam, rd, at, false, 0, null, true, (long)(Time * 20));
         }
@@ -591,6 +594,7 @@ public sealed class Game : GameWindow
             case "create": SetScreen(new CreateWorldScreen()); break;
             case "pause": SetScreen(new PauseScreen()); break;
             case "inv": SetScreen(new InventoryScreen()); break;
+            case "packs": SetScreen(new ResourcePackScreen(new OptionsScreen(new TitleScreen()))); break;
         }
     }
 }

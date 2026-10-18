@@ -108,7 +108,7 @@ public static class TextureGen
             }
     }
 
-    public static byte[] Build()
+    public static byte[] BuildProcedural()
     {
         A = new byte[Size * Size * 4];
         // Stone

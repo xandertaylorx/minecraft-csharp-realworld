@@ -49,17 +49,30 @@ public sealed class Renderer
 {
     Shader terrain, sky, cloud, line;
     int atlasTex, cloudTex, ebo, emptyVao, lineVao, lineVbo;
-    byte[] atlas;
-    int waterFrame = -1;
+    List<Anim> anims = new();
+    public int TileSize = 16;
+    public int PackOverrides;
     readonly Vector4[] planes = new Vector4[6];
     public int DrawnSections, DrawnTris;
     public Matrix4 LastView, LastProj;
     public int AtlasTex => atlasTex;
 
-    public void Init()
+    /// <summary>(Re)builds the block atlas from the given resource packs (highest priority first).</summary>
+    public void LoadAtlas(IEnumerable<string> packNames)
     {
-        atlas = TextureGen.Build();
-        atlasTex = Gfx.MakeTexture(TextureGen.Size, TextureGen.Size, atlas, false, true);
+        var stack = ResourcePacks.OpenStack(packNames);
+        AtlasResult res;
+        try { res = AtlasBuilder.Build(stack); }
+        finally { foreach (var s in stack) s.Dispose(); }
+        if (atlasTex != 0) GL.DeleteTexture(atlasTex);
+        atlasTex = Gfx.MakeTexture(res.Size, res.Size, res.Pixels, false, true, false, (int)Math.Log2(res.Tile));
+        anims = res.Anims; TileSize = res.Tile; PackOverrides = res.Overrides;
+        foreach (var a in anims) a.Current = -1;
+    }
+
+    public void Init(IEnumerable<string> packNames)
+    {
+        LoadAtlas(packNames);
         cloudTex = Gfx.MakeTexture(256, 256, TextureGen.BuildClouds(), false, false, true);
 
         terrain = new Shader(@"#version 330 core
@@ -172,16 +185,21 @@ uniform vec4 uColor; out vec4 FragColor; void main(){ FragColor = uColor; }");
         GL.BindVertexArray(0);
     }
 
-    public void AnimateWater(int frame)
+    /// <summary>Advances animated block textures (water, fire, animated pack textures) to the given game tick.</summary>
+    public void Animate(long tick)
     {
-        frame &= 15;
-        if (frame == waterFrame) return;
-        waterFrame = frame;
-        TextureGen.WaterFrame(atlas, frame);
-        TextureGen.FireFrame(atlas, frame);
-        GL.BindTexture(TextureTarget.Texture2D, atlasTex);
-        GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, TextureGen.Size, TextureGen.Size, PixelFormat.Rgba, PixelType.UnsignedByte, atlas);
-        GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
+        bool any = false;
+        foreach (var a in anims)
+        {
+            int t = (int)(tick % a.Total), pos = 0;
+            while (pos < a.Seq.Length - 1 && t >= a.Dur[pos]) { t -= a.Dur[pos]; pos++; }
+            int frame = a.Seq[pos];
+            if (frame == a.Current) continue;
+            a.Current = frame;
+            if (!any) { GL.BindTexture(TextureTarget.Texture2D, atlasTex); any = true; }
+            GL.TexSubImage2D(TextureTarget.Texture2D, 0, (a.Tile & 15) * TileSize, (a.Tile >> 4) * TileSize, TileSize, TileSize, PixelFormat.Rgba, PixelType.UnsignedByte, a.Frames[frame]);
+        }
+        if (any) GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
     }
 
     public Matrix4 BuildView(in Cam c)
