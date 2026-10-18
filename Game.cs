@@ -49,6 +49,7 @@ public sealed class Game : GameWindow
     public int MouseGuiX => mouseGui_x;
     int mouseGui_x, mouseGui_y; Vector2 mouseLogical;
     bool leftDown, rightDown; int breakCd, placeCd;
+    bool bowing; int bowCharge, heldSwing;
     long tickCount, lastSpaceTick = -100, lastWTick = -100;
     bool sprintLatch, wasFwd;
     float fovMod = 1f, panoYaw; (int, int) panoPos;
@@ -59,7 +60,7 @@ public sealed class Game : GameWindow
     // --shot mode
     readonly string[] args; bool shotLuanti;
     string shotPath, shotScene = "title", shotScreen; int shotDelay = 40; int shotFrames; bool shotPlaced;
-    readonly List<int[]> shotBreaks = new(); readonly List<string> shotCmds = new(); string shotChat;
+    readonly List<double[]> shotShoots = new(); readonly List<int[]> shotBreaks = new(); readonly List<string> shotCmds = new(); string shotChat;
     readonly List<(int, int, int, byte)> shotSets = new(); readonly List<int[]> shotFills = new(); double[] shotPos; float[] shotRot; long shotSeed = 1234; long shotTime = -1; bool shotFly;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws, string[] args) : base(gws, nws)
@@ -80,6 +81,7 @@ public sealed class Game : GameWindow
                 case "--debug": showDebug = true; break;
                 case "--pos": shotPos = new[] { double.Parse(args[++i]), double.Parse(args[++i]), double.Parse(args[++i]) }; break;
                 case "--rot": shotRot = new[] { float.Parse(args[++i]), float.Parse(args[++i]) }; break;
+                case "--shoot": shotShoots.Add(new[] { double.Parse(args[++i]), double.Parse(args[++i]), double.Parse(args[++i]), double.Parse(args[++i]) }); break;
                 case "--break": shotBreaks.Add(new[] { int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]) }); break;
                 case "--cmd": shotCmds.Add(args[++i]); break;
                 case "--chat": shotChat = args[++i]; break;
@@ -294,15 +296,20 @@ public sealed class Game : GameWindow
         int b = (int)e.Button;
         if (screen != null) { ToGui(); screen.MouseDown(mouseGui_x, mouseGui_y, b); return; }
         if (!inGame) return;
-        if (e.Button == MouseButton.Left) { leftDown = true; BreakBlock(); breakCd = 5; }
-        else if (e.Button == MouseButton.Right) { rightDown = true; PlaceBlock(); placeCd = 4; }
+        if (e.Button == MouseButton.Left) { leftDown = true; BreakBlock(); breakCd = 5; heldSwing = 6; }
+        else if (e.Button == MouseButton.Right)
+        {
+            rightDown = true;
+            if (Hotbar[Selected] == Blk.Bow && !spectator) { bowing = true; bowCharge = 0; }
+            else { PlaceBlock(); placeCd = 4; heldSwing = 6; }
+        }
         else if (e.Button == MouseButton.Middle) PickBlock();
     }
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
         base.OnMouseUp(e);
         if (e.Button == MouseButton.Left) leftDown = false;
-        if (e.Button == MouseButton.Right) rightDown = false;
+        if (e.Button == MouseButton.Right) { rightDown = false; if (bowing) { FireBow(); bowing = false; } }
         screen?.MouseUp();
     }
     protected override void OnMouseWheel(MouseWheelEventArgs e)
@@ -370,6 +377,29 @@ public sealed class Game : GameWindow
         if (Blk.Cross[id] && !Blk.Solid[world.GetBlock(px, py - 1, pz)]) return;
         world.SetBlock(px, py, pz, id);
     }
+    void FireBow()
+    {
+        if (world == null || spectator) return;
+        float f = bowCharge / 20f; f = (f * f + f * 2f) / 3f;
+        bowCharge = 0;
+        if (f < 0.1f) return;
+        if (f > 1f) f = 1f;
+        // the first arrow item in the hotbar decides the ammo; creative mode has infinite plain arrows otherwise
+        bool explosive = false;
+        for (int i = 0; i < 9; i++) { if (Hotbar[i] == Blk.ExplosiveArrow) { explosive = true; break; } if (Hotbar[i] == Blk.Arrow) break; }
+        var d = LookDir();
+        var rnd = Random.Shared;
+        float spread = 0.0075f * 1.0f;
+        var dir = new Vector3d(d.X + (rnd.NextDouble() * 2 - 1) * spread * 1.5, d.Y + (rnd.NextDouble() * 2 - 1) * spread * 1.5, d.Z + (rnd.NextDouble() * 2 - 1) * spread * 1.5);
+        dir.Normalize();
+        double yaw = P.Yaw * Math.PI / 180.0;
+        var eye = EyePos();
+        double sx = eye.X - Math.Cos(yaw) * 0.16 + dir.X * 0.3, sy = eye.Y - 0.1 + dir.Y * 0.3, sz = eye.Z - Math.Sin(yaw) * 0.16 + dir.Z * 0.3;
+        double speed = f * 3.0;
+        world.ShootArrow(sx, sy, sz, dir.X * speed, dir.Y * speed, dir.Z * speed, explosive);
+        heldSwing = 6;
+    }
+
     void PickBlock()
     {
         if (!Pick(out int x, out int y, out int z, out _, out _, out _)) return;
@@ -398,10 +428,17 @@ public sealed class Game : GameWindow
             if (leftDown && breakCd-- <= 0) { BreakBlock(); breakCd = 5; }
             if (rightDown && placeCd-- <= 0) { PlaceBlock(); placeCd = 4; }
         }
+        if (heldSwing > 0) heldSwing--;
+        if (bowing)
+        {
+            if (Hotbar[Selected] != Blk.Bow || screen != null) { bowing = false; bowCharge = 0; }
+            else bowCharge = Math.Min(bowCharge + 1, 20);
+        }
         P.Tick(world, inp);
         if (!P.Sprinting && inp.Fwd <= 0) sprintLatch = false;
         if (P.HorizColl) sprintLatch = false;
-        float tgt = P.Sprinting ? 1.12f : 1f;
+        float bf = bowing ? bowCharge / 20f : 0f; bf = Math.Min(1f, (bf * bf + bf * 2f) / 3f);
+        float tgt = (P.Sprinting ? 1.12f : 1f) * (1f - bf * 0.15f);
         fovMod += (tgt - fovMod) * 0.5f;
         if (ignoreMouse > 0) ignoreMouse--;
         Renderer.Animate(tickCount);
@@ -539,6 +576,7 @@ public sealed class Game : GameWindow
         Ui.Rect(sx + 3, y + 2, 18, 18, 0xFF8B8B8B);
         for (int i = 0; i < 9; i++)
             if (Hotbar[i] != Blk.Air) Icons.Block(Ui, Renderer.AtlasTex, Hotbar[i], x + 3 + i * 20, y + 3, 16);
+        if (screen == null && !spectator) DrawHeld(W, H);
         if (!(screen is ChatScreen))
         {
             float cy = H - 40;
@@ -554,6 +592,30 @@ public sealed class Game : GameWindow
                 cy -= 9;
             }
         }
+    }
+
+    void DrawHeld(float W, float H)
+    {
+        byte id = Hotbar[Selected];
+        if (id == Blk.Air) return;
+        float sz = 56;
+        float bob = MathF.Sin(P.WalkDist * MathF.PI) * P.BobAmt * 40f;
+        float sw = heldSwing / 6f; sw = MathF.Sin(sw * MathF.PI);
+        float x = W - sz - 18 + bob * 0.5f - sw * 14, y = H - sz - 12 + MathF.Abs(bob) * 0.4f + sw * 10;
+        float rot = 0;
+        if (id == Blk.Bow && bowing)
+        {
+            float f = Math.Min(1f, bowCharge / 20f);
+            x -= f * 26; y -= f * 6;
+            rot = -f * 0.22f;
+            if (f >= 1f) { x += MathF.Sin((float)Time * 90f) * 0.8f; y += MathF.Cos((float)Time * 70f) * 0.8f; }
+        }
+        var c = new System.Numerics.Vector2(x + sz / 2, y + sz / 2);
+        Ui.Flush();
+        Ui.Xf = System.Numerics.Matrix3x2.CreateRotation(rot, c);
+        Icons.Block(Ui, Renderer.AtlasTex, id, x, y, sz);
+        Ui.Flush();
+        Ui.Xf = null;
     }
 
     void DrawDebug()
@@ -641,6 +703,13 @@ public sealed class Game : GameWindow
                     for (int fz = Math.Min(f[2], f[5]); fz <= Math.Max(f[2], f[5]); fz++)
                         for (int fx = Math.Min(f[0], f[3]); fx <= Math.Max(f[0], f[3]); fx++) world.SetBlock(fx, fy, fz, (byte)f[6]);
             foreach (var (sx, sy, sz, sid) in shotSets) world.SetBlock(sx, sy, sz, sid);
+            foreach (var sh in shotShoots)
+            {
+                // sh = explosive(0/1), speed, yawOffset(deg), pitchOffset(deg)
+                var cm = new Cam { Yaw = P.Yaw + (float)sh[2], Pitch = P.Pitch + (float)sh[3] };
+                var dd = cm.Forward; var ee = EyePos();
+                world.ShootArrow(ee.X + dd.X * 0.3, ee.Y - 0.1 + dd.Y * 0.3, ee.Z + dd.Z * 0.3, dd.X * sh[1], dd.Y * sh[1], dd.Z * sh[1], sh[0] > 0.5);
+            }
             foreach (var br in shotBreaks) { var bb = world.GetBlock(br[0], br[1], br[2]); world.SpawnBreak(br[0], br[1], br[2], bb); world.SetBlock(br[0], br[1], br[2], Blk.Air); }
             foreach (var c in shotCmds) { Say("> " + c, 0xFFAAAAAA); Commands.Run(this, c); }
             if (shotChat != null) SetScreen(new ChatScreen(shotChat, false));

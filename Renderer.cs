@@ -414,8 +414,8 @@ public sealed class Renderer
             if (n / 4 >= EntMax - 4) break;
             double ix = a.PX + (a.X - a.PX) * partial, iy = a.PY + (a.Y - a.PY) * partial, iz = a.PZ + (a.Z - a.PZ) * partial;
             if (a.Stuck) { ix = a.X; iy = a.Y; iz = a.Z; }
-            int bx = (int)Math.Floor(ix), by = (int)Math.Floor(iy), bz = (int)Math.Floor(iz);
-            float sky = w.SkyAt(bx, by, bz) / 15f, blk = w.BlockLightAt(bx, by, bz) / 15f;
+            int bx = (int)Math.Floor(ix - a.DX * 0.6), by = (int)Math.Floor(iy - a.DY * 0.6), bz = (int)Math.Floor(iz - a.DZ * 0.6);
+            float sky = Math.Max(w.SkyAt(bx, by, bz), 2) / 15f, blk = w.BlockLightAt(bx, by, bz) / 15f;
             var d = new Vector3((float)a.DX, (float)a.DY, (float)a.DZ);
             var up = MathF.Abs(d.Y) > 0.98f ? Vector3.UnitX : Vector3.UnitY;
             var s1 = Vector3.Normalize(Vector3.Cross(d, up)); var s2 = Vector3.Cross(d, s1);

@@ -21,11 +21,20 @@ Requires the .NET 10 SDK. Tested on macOS (Apple Silicon).
 | Ctrl / double-tap W | sprint |
 | Shift | sneak (also fly down) |
 | Space / double-tap Space | jump / toggle flying |
-| Left / Right / Middle click | break / place or use / pick block |
+| Left / Right / Middle click | break / place or use / pick block (hold right click with a bow to draw, release to shoot) |
 | 1-9, scroll | hotbar |
 | E | creative inventory (torch, flint & steel, water source...) |
 | F1 / F2 / F3 / F11 | hide HUD / screenshot / debug / fullscreen |
 | Esc | pause |
+
+## TNT, bow and arrows
+
+- **TNT** is lit with flint & steel, by adjacent fire, or by another explosion (chain reactions). Primed TNT pops up, falls, flashes white and blows up after 4 seconds.
+- Explosions use Minecraft's algorithm: 1352 rays that lose strength by each block's blast resistance (stone and bricks resist, dirt and leaves don't, water absorbs it), power 4, knockback for you and other TNT, and a bloom flash with smoke and sparks.
+- **Bow:** hold right click to draw (the FOV tightens, like vanilla), release to shoot. Arrows fly with vanilla physics (gravity 0.05, drag 0.99, 0.6 in water) and stick into blocks.
+  The first arrow item in your hotbar picks the ammo; with none you shoot plain arrows. An **Explosive Arrow** detonates on impact (power 3).
+- Breaking any block throws a burst of textured fragments like Minecraft.
+- Try `/give tnt`, `/give bow`, `/give explosive_arrow`, `/summon tnt ~ ~ ~ 40` or `/explode ~ ~ ~ 6`.
 
 ## Commands
 
