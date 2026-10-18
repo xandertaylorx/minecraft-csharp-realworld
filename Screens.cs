@@ -307,6 +307,7 @@ public sealed class OptionsScreen : Screen
         Buttons.Add(bob);
         var fs = new Btn(rx, y, 150, 20, "Toggle Fullscreen (F11)", () => G.ToggleFullscreen());
         Buttons.Add(fs);
+        Buttons.Add(new Btn(lx, y + 24, 310, 20, "Resource Packs...", () => G.OpenScreen(new ResourcePackScreen(this))));
         Buttons.Add(new Btn(W / 2 - 100, H / 6 + 24 * 6 + 8, 200, 20, "Done", () => { s.Save(); G.SetScreen(parent); }));
     }
     protected override void DrawContent(UiBatch ui, int mx, int my) => ui.TextCentered("Options", W / 2f, 15);
@@ -524,5 +525,152 @@ public sealed class InventoryScreen : Screen
                 ui.Text(n, mx + 13, my - 11, 0xFFFFFFFF);
             }
         }
+    }
+}
+
+public sealed class ResourcePackScreen : Screen
+{
+    readonly Screen parent;
+    List<PackInfo> all = new(), sel = new(), avail = new();
+    float scrollA, scrollS;
+    const int EntryH = 36;
+    string initial;
+    public override bool DirtBg => true;
+    public ResourcePackScreen(Screen p) { parent = p; }
+    int ListTop => 36;
+    int ListBottom => H - 58;
+    int LeftX => W / 2 - 205;
+    int RightX => W / 2 + 5;
+    const int ListW = 200;
+
+    public override void OnEscape() => Done();
+    void Done()
+    {
+        Commit();
+        if (string.Join("|", G.Settings.ResourcePacks) != initial) G.ReloadResources();
+        G.Settings.Save();
+        G.SetScreen(parent);
+    }
+    void Commit() => G.Settings.ResourcePacks = sel.Select(p => p.Name).ToList();
+
+    protected override void Build()
+    {
+        if (all.Count == 0 && initial == null)
+        {
+            all = ResourcePacks.Discover();
+            initial = string.Join("|", G.Settings.ResourcePacks);
+            sel = G.Settings.ResourcePacks.Distinct().Select(n => all.FirstOrDefault(a => a.Name == n)).Where(a => a != null).ToList();
+            avail = all.Where(a => !sel.Contains(a)).ToList();
+        }
+        Buttons.Add(new Btn(W / 2 - 154, H - 52, 150, 20, "Open Pack Folder", ResourcePacks.OpenFolder));
+        Buttons.Add(new Btn(W / 2 + 4, H - 52, 150, 20, "Done", Done));
+        Buttons.Add(new Btn(W / 2 - 154, H - 28, 150, 20, "Refresh Packs", Refresh));
+        Buttons.Add(new Btn(W / 2 + 4, H - 28, 150, 20, "Clear Selection", () => { avail.AddRange(sel); sel.Clear(); Commit(); }));
+    }
+
+    void Refresh()
+    {
+        var names = sel.Select(p => p.Name).ToList();
+        all = ResourcePacks.Discover();
+        sel = names.Select(n => all.FirstOrDefault(a => a.Name == n)).Where(a => a != null).ToList();
+        avail = all.Where(a => !sel.Contains(a)).ToList();
+        Commit();
+    }
+
+    public override void Scroll(float dy)
+    {
+        int mx = G.MouseGuiX;
+        if (mx < W / 2) scrollA = Math.Clamp(scrollA - dy * 12, 0, Math.Max(0, avail.Count * EntryH - (ListBottom - ListTop)));
+        else scrollS = Math.Clamp(scrollS - dy * 12, 0, Math.Max(0, (sel.Count + 1) * EntryH - (ListBottom - ListTop)));
+    }
+
+    int EntryAt(int mx, int my, int lx, float scroll, int count)
+    {
+        if (mx < lx || mx >= lx + ListW || my < ListTop || my >= ListBottom) return -1;
+        int i = (int)((my - ListTop + scroll) / EntryH);
+        return i >= 0 && i < count ? i : -1;
+    }
+
+    public override void MouseDown(int mx, int my, int button)
+    {
+        base.MouseDown(mx, my, button);
+        if (button != 0) return;
+        int i = EntryAt(mx, my, LeftX, scrollA, avail.Count);
+        if (i >= 0) { var p = avail[i]; avail.RemoveAt(i); sel.Insert(0, p); Commit(); return; }
+        i = EntryAt(mx, my, RightX, scrollS, sel.Count);
+        if (i >= 0)
+        {
+            int ex = RightX + ListW - 14;
+            float ey = ListTop + i * EntryH - scrollS;
+            if (mx >= ex && mx < ex + 12)
+            {
+                if (my < ey + EntryH / 2 && i > 0) { (sel[i], sel[i - 1]) = (sel[i - 1], sel[i]); Commit(); return; }
+                if (my >= ey + EntryH / 2 && i < sel.Count - 1) { (sel[i], sel[i + 1]) = (sel[i + 1], sel[i]); Commit(); return; }
+                return;
+            }
+            var p = sel[i]; sel.RemoveAt(i); avail.Add(p); Commit();
+        }
+    }
+
+    static string Fit(UiBatch ui, string s, int maxW)
+    {
+        if (ui.TextWidth(s) <= maxW) return s;
+        while (s.Length > 1 && ui.TextWidth(s + "...") > maxW) s = s[..^1];
+        return s + "...";
+    }
+
+    void DrawList(UiBatch ui, int lx, float scroll, List<PackInfo> list, bool selected, int mx, int my, string title)
+    {
+        ui.TextCentered(title, lx + ListW / 2f, 24, 0xFFFFFFFF);
+        ui.Rect(lx, ListTop, ListW, ListBottom - ListTop, 0xA0000000);
+        int hover = EntryAt(mx, my, lx, scroll, list.Count + (selected ? 1 : 0));
+        int total = list.Count + (selected ? 1 : 0);
+        for (int i = 0; i < total; i++)
+        {
+            float y = ListTop + i * EntryH - scroll;
+            if (y + EntryH < ListTop || y > ListBottom) continue;
+            bool isDefault = selected && i == list.Count;
+            if (i == hover && !isDefault) ui.Rect(lx, y, ListW, EntryH, 0x60FFFFFF);
+            // 32x32 icon
+            if (isDefault) { ui.Rect(lx + 2, y + 2, 32, 32, 0xFF303030); Icons.Block(ui, G.Renderer.AtlasTex, Blk.Grass, lx + 2, y + 2, 32); }
+            else
+            {
+                var p = list[i];
+                p.EnsureIcon();
+                if (p.IconTex != 0) { ui.SetTex(p.IconTex); ui.Quad(lx + 2, y + 2, 32, 32, 0, 0, 1, 1, 0xFFFFFFFF); }
+                else { ui.Rect(lx + 2, y + 2, 32, 32, 0xFF404040); ui.TextCentered("?", lx + 18, y + 14, 0xFF909090); }
+            }
+            int tw = ListW - 40 - (selected && !isDefault ? 14 : 0);
+            string name = isDefault ? "Default" : list[i].Name;
+            string desc = isDefault ? "The default look and feel" : list[i].Description;
+            if (!isDefault && list[i].Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && name.Length > 4) name = name[..^4];
+            ui.Text(Fit(ui, name, tw), lx + 38, y + 4, 0xFFFFFFFF);
+            ui.Text(Fit(ui, desc, tw), lx + 38, y + 15, 0xFF808080);
+            if (!isDefault && !selected) ui.Text(Fit(ui, "Click to activate", tw), lx + 38, y + 25, 0xFF606060);
+            if (selected && !isDefault)
+            {
+                int ex = lx + ListW - 14;
+                bool canUp = i > 0, canDown = i < list.Count - 1;
+                ui.Text("^", ex + 3, y + 7, canUp ? 0xFFFFFFFF : 0xFF505050);
+                ui.Text("v", ex + 3, y + 21, canDown ? 0xFFFFFFFF : 0xFF505050);
+            }
+        }
+        ui.GradientRect(lx, ListTop, ListW, 4, 0xFF000000, 0x00000000);
+        ui.GradientRect(lx, ListBottom - 4, ListW, 4, 0x00000000, 0xFF000000);
+    }
+
+    protected override void DrawContent(UiBatch ui, int mx, int my)
+    {
+        ui.TextCentered("Select Resource Packs", W / 2f, 10);
+        DrawList(ui, LeftX, scrollA, avail, false, mx, my, "Available Resource Packs");
+        DrawList(ui, RightX, scrollS, sel, true, mx, my, "Selected Resource Packs");
+        if (avail.Count == 0 && sel.Count == 0)
+        {
+            ui.TextCentered("No packs found.", LeftX + ListW / 2f, ListTop + 14, 0xFFA0A0A0);
+            ui.TextCentered("Click 'Open Pack Folder' and drop", LeftX + ListW / 2f, ListTop + 28, 0xFF808080);
+            ui.TextCentered(".zip packs or folders in.", LeftX + ListW / 2f, ListTop + 38, 0xFF808080);
+        }
+        ui.TextCentered("Top pack overrides the ones below.", W / 2f, H - 80, 0xFF707070);
+        ui.TextCentered("Minecraft Java packs work (16x - 128x).", W / 2f, H - 70, 0xFF707070);
     }
 }

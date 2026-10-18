@@ -1,7 +1,7 @@
 # minecraft-remake-csharp
 
 A from-scratch, Minecraft-style voxel game written in **C# / .NET 10** with **OpenTK** (OpenGL 3.3 core).
-No Mojang assets are used: every texture, the font and the UI are generated in code.
+No Mojang assets are bundled: every default texture, the font and the UI are generated in code (you can load your own resource packs).
 
 > Not affiliated with or endorsed by Mojang AB / Microsoft.
 
@@ -26,6 +26,19 @@ Requires the .NET 10 SDK. Tested on macOS (Apple Silicon).
 | E | creative inventory (torch, flint & steel, water source...) |
 | F1 / F2 / F3 / F11 | hide HUD / screenshot / debug / fullscreen |
 | Esc | pause |
+
+## Resource packs
+
+The game loads **Minecraft Java Edition resource packs** the same way Minecraft does:
+
+1. Open **Options > Resource Packs...** and click **Open Pack Folder** (it is created for you).
+2. Drop packs in as `.zip` files or unzipped folders (`pack.mcmeta` + `assets/minecraft/textures/block|item/*.png`).
+3. Click a pack to activate it. Packs higher in the *Selected* list override the ones below; use the arrows to reorder.
+
+Supported: 16x up to 128x textures, animated textures (`*.png.mcmeta` with `frametime` / `frames`), biome-tinted grass,
+leaves and water, the grass side overlay, and both the modern (`block/`) and legacy (`blocks/`) texture names.
+Without a pack the built-in generated textures are used. The pack folder lives in your user data directory
+(`~/Library/Application Support/McClone/resourcepacks` on macOS), so no third-party art ever ends up in this repo.
 
 ## Features
 

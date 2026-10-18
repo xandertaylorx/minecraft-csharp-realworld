@@ -15,6 +15,7 @@ public sealed class Settings
     public int Fov = 70, RenderDist = 10, GuiScale = 0;
     public float Sensitivity = 0.5f;
     public bool Clouds = true, VSync = true, Bobbing = true;
+    public List<string> ResourcePacks = new();   // highest priority first
 
     static string PathFile => Path.Combine(SaveIO.RootDir, "options.txt");
     public static Settings Load()
@@ -37,6 +38,7 @@ public sealed class Settings
                         case "clouds": s.Clouds = v == "true"; break;
                         case "vsync": s.VSync = v == "true"; break;
                         case "bobbing": s.Bobbing = v == "true"; break;
+                        case "resourcePacks": s.ResourcePacks = v.Split('|', StringSplitOptions.RemoveEmptyEntries).Distinct().ToList(); break;
                     }
                 }
         }
@@ -52,7 +54,8 @@ public sealed class Settings
             {
                 $"fov:{Fov}", $"renderDistance:{RenderDist}", $"guiScale:{GuiScale}",
                 $"sensitivity:{Sensitivity.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
-                $"clouds:{(Clouds ? "true" : "false")}", $"vsync:{(VSync ? "true" : "false")}", $"bobbing:{(Bobbing ? "true" : "false")}"
+                $"clouds:{(Clouds ? "true" : "false")}", $"vsync:{(VSync ? "true" : "false")}", $"bobbing:{(Bobbing ? "true" : "false")}",
+                $"resourcePacks:{string.Join("|", ResourcePacks)}"
             });
         }
         catch { }
