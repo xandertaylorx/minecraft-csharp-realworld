@@ -59,7 +59,7 @@ public struct Atmos
 public sealed class Renderer
 {
     Shader terrain, sky, cloud, line, shadowSh, water, bloomSh, post, glow, part;
-    int partVao, partVbo;
+    int partVao, partVbo, entVao, entVbo;
     int atlasTex, cloudTex, ebo, emptyVao, lineVao, lineVbo, glowVao, glowVbo;
     List<Anim> anims = new();
     public int TileSize = 16;
@@ -140,6 +140,20 @@ public sealed class Renderer
         GL.EnableVertexAttribArray(3); GL.VertexAttribPointer(3, 3, VertexAttribPointerType.Float, false, ps, 28);
         GL.EnableVertexAttribArray(4); GL.VertexAttribPointer(4, 3, VertexAttribPointerType.Float, false, ps, 40);
         GL.EnableVertexAttribArray(5); GL.VertexAttribPointer(5, 3, VertexAttribPointerType.Float, false, ps, 52);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, ebo);
+        GL.BindVertexArray(0);
+        // entities (primed TNT, arrows) use the terrain vertex layout
+        entVao = GL.GenVertexArray(); entVbo = GL.GenBuffer();
+        GL.BindVertexArray(entVao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, entVbo);
+        GL.BufferData(BufferTarget.ArrayBuffer, EntMax * 4 * Mesher.FloatsPerVertex * 4, IntPtr.Zero, BufferUsageHint.DynamicDraw);
+        int es = Mesher.FloatsPerVertex * 4;
+        GL.EnableVertexAttribArray(0); GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, es, 0);
+        GL.EnableVertexAttribArray(1); GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, es, 12);
+        GL.EnableVertexAttribArray(2); GL.VertexAttribPointer(2, 1, VertexAttribPointerType.Float, false, es, 20);
+        GL.EnableVertexAttribArray(3); GL.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, es, 24);
+        GL.EnableVertexAttribArray(4); GL.VertexAttribPointer(4, 1, VertexAttribPointerType.Float, false, es, 28);
+        GL.EnableVertexAttribArray(5); GL.VertexAttribPointer(5, 3, VertexAttribPointerType.Float, false, es, 32);
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, ebo);
         GL.BindVertexArray(0);
         EnsureShadowMap(2);
@@ -338,6 +352,98 @@ public sealed class Renderer
         return n;
     }
 
+    // ------------------------------------------------------------------ entities
+    const int EntMax = 4096;
+    readonly float[] entData = new float[EntMax * 4 * Mesher.FloatsPerVertex], flashData = new float[EntMax * 4 * Mesher.FloatsPerVertex];
+    static readonly int[,] CNrm = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+    static readonly int[,] CU = { { 0, 0, -1 }, { 0, 0, 1 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { -1, 0, 0 } };
+    static readonly int[,] CV = { { 0, 1, 0 }, { 0, 1, 0 }, { 0, 0, -1 }, { 0, 0, 1 }, { 0, 1, 0 }, { 0, 1, 0 } };
+    static readonly int[,] COrg = { { 1, 0, 1 }, { 0, 0, 0 }, { 0, 1, 1 }, { 0, 0, 0 }, { 0, 0, 1 }, { 1, 0, 0 } };
+    static readonly float[] CShade = { 0.6f, 0.6f, 1f, 0.5f, 0.8f, 0.8f };
+    static readonly int[] KU = { 0, 1, 1, 0 }, KV = { 0, 0, 1, 1 };
+
+    static void EV(float[] a, ref int n, float x, float y, float z, float u, float v, float shade, float sky, float blk)
+    {
+        int o = n * Mesher.FloatsPerVertex;
+        a[o] = x; a[o + 1] = y; a[o + 2] = z; a[o + 3] = u; a[o + 4] = v; a[o + 5] = shade; a[o + 6] = sky; a[o + 7] = blk; a[o + 8] = 1; a[o + 9] = 1; a[o + 10] = 1;
+        n++;
+    }
+    static void PutCube(float[] a, ref int n, float cx, float cy, float cz, float h, int tTop, int tBot, int tSide, float sky, float blk)
+    {
+        for (int f = 0; f < 6; f++)
+        {
+            int tile = f == 2 ? tTop : f == 3 ? tBot : tSide;
+            float u0 = (tile & 15) / 16f + 0.0004f, v0 = (tile >> 4) / 16f + 0.0004f, sz = 1f / 16f - 0.0008f;
+            for (int k = 0; k < 4; k++)
+            {
+                float px = COrg[f, 0] + KU[k] * CU[f, 0] + KV[k] * CV[f, 0], py = COrg[f, 1] + KU[k] * CU[f, 1] + KV[k] * CV[f, 1], pz = COrg[f, 2] + KU[k] * CU[f, 2] + KV[k] * CV[f, 2];
+                EV(a, ref n, cx + (px * 2 - 1) * h, cy + (py * 2 - 1) * h, cz + (pz * 2 - 1) * h, u0 + KU[k] * sz, v0 + (1 - KV[k]) * sz, CShade[f], sky, blk);
+            }
+        }
+    }
+    static void PutArrowQuad(float[] a, ref int n, Vector3 tip, Vector3 d, Vector3 side, float len, float halfW, int tile, float sky, float blk)
+    {
+        float u0 = (tile & 15) / 16f + 0.0004f, v0 = (tile >> 4) / 16f + 0.0004f, sz = 1f / 16f - 0.0008f;
+        var tail = tip - d * len;
+        var p0 = tail - side * halfW; var p1 = tip - side * halfW; var p2 = tip + side * halfW; var p3 = tail + side * halfW;
+        EV(a, ref n, p0.X, p0.Y, p0.Z, u0, v0 + sz, 1f, sky, blk);
+        EV(a, ref n, p1.X, p1.Y, p1.Z, u0 + sz, v0 + sz, 1f, sky, blk);
+        EV(a, ref n, p2.X, p2.Y, p2.Z, u0 + sz, v0, 1f, sky, blk);
+        EV(a, ref n, p3.X, p3.Y, p3.Z, u0, v0, 1f, sky, blk);
+    }
+
+    void DrawEntities(World w, in Cam cam, float partial)
+    {
+        if (w.TntEntities.Count == 0 && w.Arrows.Count == 0) return;
+        int n = 0, nf = 0;     // vertex counts
+        foreach (var t in w.TntEntities)
+        {
+            if (n / 4 >= EntMax - 6) break;
+            double ix = t.PX + (t.X - t.PX) * partial, iy = t.PY + (t.Y - t.PY) * partial, iz = t.PZ + (t.Z - t.PZ) * partial;
+            float q = Math.Clamp((t.Fuse - partial + 1f) / 10f, 0f, 1f); q = 1f - q; q = q * q * q * q;
+            float h = 0.49f * (1f + q * 0.3f);
+            int bx = (int)Math.Floor(ix), by = (int)Math.Floor(iy + 0.5), bz = (int)Math.Floor(iz);
+            float sky = w.SkyAt(bx, by, bz) / 15f, blk = w.BlockLightAt(bx, by, bz) / 15f;
+            float cx = (float)(ix - cam.Pos.X), cy = (float)(iy + 0.49 - cam.Pos.Y), cz = (float)(iz - cam.Pos.Z);
+            PutCube(entData, ref n, cx, cy, cz, h, T.TntTop, T.TntBottom, T.TntSide, sky, blk);
+            if ((t.Fuse / 5) % 2 == 0) PutCube(flashData, ref nf, cx, cy, cz, h * 1.004f, T.Snow, T.Snow, T.Snow, 1f, 1f);
+        }
+        int nTnt = n;
+        foreach (var a in w.Arrows)
+        {
+            if (n / 4 >= EntMax - 4) break;
+            double ix = a.PX + (a.X - a.PX) * partial, iy = a.PY + (a.Y - a.PY) * partial, iz = a.PZ + (a.Z - a.PZ) * partial;
+            if (a.Stuck) { ix = a.X; iy = a.Y; iz = a.Z; }
+            int bx = (int)Math.Floor(ix), by = (int)Math.Floor(iy), bz = (int)Math.Floor(iz);
+            float sky = w.SkyAt(bx, by, bz) / 15f, blk = w.BlockLightAt(bx, by, bz) / 15f;
+            var d = new Vector3((float)a.DX, (float)a.DY, (float)a.DZ);
+            var up = MathF.Abs(d.Y) > 0.98f ? Vector3.UnitX : Vector3.UnitY;
+            var s1 = Vector3.Normalize(Vector3.Cross(d, up)); var s2 = Vector3.Cross(d, s1);
+            var tip = new Vector3((float)(ix - cam.Pos.X), (float)(iy - cam.Pos.Y), (float)(iz - cam.Pos.Z));
+            int tile = a.Explosive ? T.ExplosiveArrowEntity : T.ArrowEntity;
+            PutArrowQuad(entData, ref n, tip, d, s1, 0.95f, 0.13f, tile, sky, blk);
+            PutArrowQuad(entData, ref n, tip, d, s2, 0.95f, 0.13f, tile, sky, blk);
+        }
+        GL.Disable(EnableCap.CullFace);
+        GL.Uniform3(terrain.U("uOff"), 0f, 0f, 0f);
+        GL.BindVertexArray(entVao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, entVbo);
+        GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, n * Mesher.FloatsPerVertex * 4, entData);
+        GL.DrawElements(PrimitiveType.Triangles, n / 4 * 6, DrawElementsType.UnsignedInt, 0);
+        DrawnTris += n / 2;
+        if (nf > 0)
+        {
+            terrain.Set("uWater", 1f); terrain.Set("uWaterAlpha", 0.62f);
+            GL.Enable(EnableCap.Blend); GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            GL.DepthMask(false);
+            GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, nf * Mesher.FloatsPerVertex * 4, flashData);
+            GL.DrawElements(PrimitiveType.Triangles, nf / 4 * 6, DrawElementsType.UnsignedInt, 0);
+            GL.DepthMask(true); GL.Disable(EnableCap.Blend);
+            terrain.Set("uWater", 0f); terrain.Set("uWaterAlpha", 1f);
+        }
+        GL.Enable(EnableCap.CullFace);
+    }
+
     // ------------------------------------------------------------------ particles
     const int PartMax = 8000, PartStride = 16;
     readonly float[] partDebris = new float[PartMax * 4 * PartStride], partSmoke = new float[PartMax * 4 * PartStride];
@@ -527,6 +633,8 @@ public sealed class Renderer
                 }
             }
         }
+
+        DrawEntities(w, cam, partial);
 
         // selection outline
         if (selected.HasValue)

@@ -311,6 +311,63 @@ public static class TextureGen
             Px(9, 4, 96, 96, 104); Px(10, 5, 90, 90, 98);
             Px(11, 8, 255, 205, 70); Px(10, 9, 255, 150, 40); // spark
         }
+        // ---- TNT, bow, arrows
+        {
+            var rng = new Random(40);
+            string[] letters = { "111010010010010", "101111111101101", "111010010010010" };   // T N T (3x5 each)
+            for (int y = 0; y < 16; y++)
+                for (int x = 0; x < 16; x++)
+                {
+                    float j = (rng.NextSingle() - .5f) * 12;
+                    bool seam = (x % 4) == 0;
+                    float r = 196 + j - (seam ? 36 : 0), g = 40 + j * .4f - (seam ? 10 : 0), b = 30 + j * .3f - (seam ? 8 : 0);
+                    if (y >= 4 && y <= 10) { r = 214 + j; g = 204 + j; b = 178 + j; }
+                    P(T.TntSide, x, y, r, g, b);
+                    // top / bottom: the ends of the dynamite sticks
+                    bool ring = (x % 4 == 0 || x % 4 == 3 || y % 4 == 0 || y % 4 == 3);
+                    float tr = ring ? 150 + j : 206 + j, tg = ring ? 30 + j * .3f : 52 + j * .4f, tb = ring ? 24 : 34;
+                    P(T.TntBottom, x, y, tr, tg, tb);
+                    bool hole = x >= 6 && x <= 9 && y >= 6 && y <= 9;
+                    if (hole) P(T.TntTop, x, y, (x == 7 || x == 8) && (y == 7 || y == 8) ? 30 : 92, (x == 7 || x == 8) && (y == 7 || y == 8) ? 22 : 66, 40);
+                    else P(T.TntTop, x, y, tr, tg, tb);
+                }
+            for (int li = 0; li < 3; li++)
+                for (int ly = 0; ly < 5; ly++)
+                    for (int lx = 0; lx < 3; lx++)
+                        if (letters[li][ly * 3 + lx] == '1') P(T.TntSide, 2 + li * 4 + lx, 5 + ly, 28, 24, 22);
+            // fuse on top
+            P(T.TntTop, 7, 7, 250, 190, 60); P(T.TntTop, 8, 8, 70, 50, 30);
+
+            // bow item (arc facing up-right, string on the chord)
+            for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++) { P(T.Bow, x, y, 0, 0, 0, 0); P(T.Arrow, x, y, 0, 0, 0, 0); P(T.ExplosiveArrow, x, y, 0, 0, 0, 0); P(T.ArrowEntity, x, y, 0, 0, 0, 0); P(T.ExplosiveArrowEntity, x, y, 0, 0, 0, 0); }
+            for (int a = -84; a <= -6; a += 3)
+            {
+                double ang = a * Math.PI / 180.0;
+                int px = (int)Math.Round(2.5 + 11.5 * Math.Cos(ang)), py = (int)Math.Round(13.5 + 11.5 * Math.Sin(ang));
+                if (px < 0 || py < 0 || px > 15 || py > 15) continue;
+                float v = (a % 2 == 0) ? 0 : -14;
+                P(T.Bow, px, py, 132 + v, 92 + v, 44 + v);
+                if (px + 1 < 16 && py - 0 >= 0 && (a % 6 == 0)) P(T.Bow, px - 1 < 0 ? 0 : px - 1, py, 104, 72, 34);
+            }
+            // string between the two arc ends
+            for (int s = 0; s <= 11; s++) { int px = 5 + s, py = 2 + s; if (px < 16 && py < 16) P(T.Bow, px, py, 226, 226, 226); }
+
+            // arrow item: shaft diagonal, stone tip top-right, white feathers bottom-left
+            for (int s = 0; s <= 9; s++) { P(T.Arrow, 3 + s, 12 - s, 142, 104, 62); P(T.ExplosiveArrow, 3 + s, 12 - s, 142, 104, 62); }
+            foreach (var (x, y) in new[] { (12, 3), (13, 2), (13, 3), (12, 2), (14, 1), (13, 4), (11, 2) }) { P(T.Arrow, x, y, 168, 170, 176); }
+            foreach (var (x, y) in new[] { (2, 13), (1, 14), (2, 12), (3, 14), (1, 13), (3, 13), (0, 15), (2, 14) }) { P(T.Arrow, x, y, 236, 236, 236); P(T.ExplosiveArrow, x, y, 236, 236, 236); }
+            // explosive arrow: dynamite stick near the tip, black band, glowing fuse
+            foreach (var (x, y) in new[] { (9, 6), (10, 5), (10, 6), (9, 5), (8, 7), (9, 7), (10, 4), (11, 4), (11, 5), (8, 6) }) P(T.ExplosiveArrow, x, y, 206, 40, 32);
+            foreach (var (x, y) in new[] { (11, 3), (12, 3), (12, 2), (13, 2) }) P(T.ExplosiveArrow, x, y, 40, 34, 30);
+            P(T.ExplosiveArrow, 14, 1, 255, 210, 70); P(T.ExplosiveArrow, 13, 1, 255, 130, 30);
+
+            // arrow entity textures: horizontal, tip to the right
+            for (int x = 1; x <= 13; x++) { P(T.ArrowEntity, x, 7, 150, 110, 66); P(T.ArrowEntity, x, 8, 118, 84, 48); P(T.ExplosiveArrowEntity, x, 7, 150, 110, 66); P(T.ExplosiveArrowEntity, x, 8, 118, 84, 48); }
+            foreach (var (x, y) in new[] { (13, 5), (13, 6), (13, 7), (13, 8), (13, 9), (13, 10), (14, 6), (14, 7), (14, 8), (14, 9), (15, 7), (15, 8) }) P(T.ArrowEntity, x, y, 172, 174, 180);
+            foreach (var (x, y) in new[] { (0, 5), (0, 10), (1, 5), (1, 6), (1, 9), (1, 10), (2, 6), (2, 9), (3, 6), (3, 7), (3, 8), (3, 9), (2, 7), (2, 8), (0, 6), (0, 9) }) { P(T.ArrowEntity, x, y, 238, 238, 238); P(T.ExplosiveArrowEntity, x, y, 238, 238, 238); }
+            for (int x = 9; x <= 14; x++) for (int y = 5; y <= 10; y++) { bool band = x == 12; P(T.ExplosiveArrowEntity, x, y, band ? 36 : 208, band ? 30 : 42, band ? 28 : 34); }
+            P(T.ExplosiveArrowEntity, 15, 6, 255, 210, 70); P(T.ExplosiveArrowEntity, 15, 7, 255, 130, 30);
+        }
         FireFrame(A, 0);
         return A;
     }

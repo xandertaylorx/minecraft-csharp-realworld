@@ -57,6 +57,11 @@ public static class AtlasBuilder
         new(T.FlintSteel, 0, "item/flint_and_steel", "items/flint_and_steel"),
         new(T.Torch, 0, "block/torch", "blocks/torch_on"),
         new(T.Fire, 0, "block/fire_0", "blocks/fire_layer_0"),
+        new(T.TntSide, 0, "block/tnt_side", "blocks/tnt_side"),
+        new(T.TntTop, 0, "block/tnt_top", "blocks/tnt_top"),
+        new(T.TntBottom, 0, "block/tnt_bottom", "blocks/tnt_bottom"),
+        new(T.Bow, 0, "item/bow", "items/bow_standby"),
+        new(T.Arrow, 0, "item/arrow", "items/arrow"),
     };
     static readonly string[] GrassOverlay = { "block/grass_block_side_overlay", "blocks/grass_side_overlay" };
     const string Root = "assets/minecraft/textures/";
@@ -183,7 +188,7 @@ public static class AtlasBuilder
             int tx = (tile & 15) * T2, ty = (tile >> 4) * T2;
             for (int y = 0; y < T2; y++) Buffer.BlockCopy(px, y * T2 * 4, res.Pixels, ((ty + y) * size + tx) * 4, T2 * 4);
         }
-        for (int tile = 0; tile <= T.Fire; tile++)
+        for (int tile = 0; tile <= T.Max; tile++)
         {
             if (loaded.TryGetValue(tile, out var l))
             {

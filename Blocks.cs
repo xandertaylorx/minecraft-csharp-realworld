@@ -5,21 +5,22 @@ public static class T
     public const int Stone = 0, Dirt = 1, GrassTop = 2, GrassSide = 3, Cobble = 4, Planks = 5, Bedrock = 6, Sand = 7, Gravel = 8,
         Water = 9, LogSide = 10, LogTop = 11, Leaves = 12, SandstoneSide = 13, SandstoneTop = 14, Snow = 15, SnowSide = 16,
         Coal = 17, Iron = 18, Gold = 19, Diamond = 20, Glass = 21, Bricks = 22, TallGrass = 23, Dandelion = 24, Poppy = 25,
-        CactusSide = 26, CactusTop = 27, FlintSteel = 28, Torch = 29, Fire = 30;
+        CactusSide = 26, CactusTop = 27, FlintSteel = 28, Torch = 29, Fire = 30,
+        TntSide = 31, TntTop = 32, TntBottom = 33, Bow = 34, Arrow = 35, ExplosiveArrow = 36, ArrowEntity = 37, ExplosiveArrowEntity = 38, Max = 38;
 }
 
 public static class Blk
 {
     public const byte Air = 0, Stone = 1, Grass = 2, Dirt = 3, Cobble = 4, Planks = 5, Bedrock = 6, Sand = 7, Gravel = 8,
         Water = 9, Log = 10, Leaves = 11, Sandstone = 12, SnowGrass = 13, CoalOre = 14, IronOre = 15, GoldOre = 16,
-        DiamondOre = 17, Glass = 18, Bricks = 19, TallGrass = 20, Dandelion = 21, Poppy = 22, Cactus = 23, Snow = 24,
+        DiamondOre = 17, Glass = 18, Bricks = 19, TallGrass = 20, Dandelion = 21, Poppy = 22, Cactus = 23, Snow = 24, Tnt = 25,
         // flowing water: Flow1..Flow7 = level 1..7 (higher = thinner), Falling = water falling straight down
         Flow1 = 26, Flow7 = 32, Falling = 33,
         Fire = 34,
         // torches are named after the direction of the block they are attached to
         TorchFloor = 35, TorchPX = 36, TorchNX = 37, TorchPZ = 38, TorchNZ = 39,
         // items (not placeable blocks)
-        FlintSteel = 128;
+        FlintSteel = 128, Bow = 129, Arrow = 130, ExplosiveArrow = 131;
 
     public static readonly bool[] Opaque = new bool[256];
     public static readonly bool[] Solid = new bool[256];
@@ -28,6 +29,7 @@ public static class Blk
     public static readonly bool[] TorchT = new bool[256];
     public static readonly bool[] Sprite = new bool[256];      // drawn as a flat sprite in inventory/hotbar
     public static readonly byte[] Opacity = new byte[256];
+    public static readonly float[] Resist = new float[256];   // explosion (blast) resistance
     public static readonly byte[] Emit = new byte[256];        // block light emission
     public static readonly byte[] Tint = new byte[256];        // 0 none 1 grass 2 foliage 3 water
     public static readonly byte[] FlameOdds = new byte[256];   // how readily fire spreads onto it
@@ -89,8 +91,20 @@ public static class Blk
         for (byte id = TorchFloor; id <= TorchNZ; id++) { TorchT[id] = true; Emit[id] = 14; Sprite[id] = true; }
         Def(FlintSteel, "Flint and Steel", T.FlintSteel, T.FlintSteel, T.FlintSteel, false, false, 0);
         Sprite[FlintSteel] = true;
+        Def(Tnt, "TNT", T.TntTop, T.TntBottom, T.TntSide);
+        Def(Bow, "Bow", T.Bow, T.Bow, T.Bow, false, false, 0); Sprite[Bow] = true;
+        Def(Arrow, "Arrow", T.Arrow, T.Arrow, T.Arrow, false, false, 0); Sprite[Arrow] = true;
+        Def(ExplosiveArrow, "Explosive Arrow", T.ExplosiveArrow, T.ExplosiveArrow, T.ExplosiveArrow, false, false, 0); Sprite[ExplosiveArrow] = true;
+        byName = null;
+        // explosion resistance (vanilla values)
+        void R(float v, params byte[] ids) { foreach (var i in ids) Resist[i] = v; }
+        R(6, Stone, Cobble, Bricks); R(3, Planks, CoalOre, IronOre, GoldOre, DiamondOre); R(3600000, Bedrock);
+        R(0.5f, Dirt, Sand); R(0.6f, Grass, SnowGrass, Gravel); R(2, Log); R(0.2f, Leaves, Snow); R(0.8f, Sandstone);
+        R(0.3f, Glass); R(0.4f, Cactus); R(0, Tnt, TallGrass, Dandelion, Poppy, Fire, TorchFloor, TorchPX, TorchNX, TorchPZ, TorchNZ);
+        for (int i = 0; i < 256; i++) if (WaterT[i]) Resist[i] = 100f;
         Cross[TallGrass] = Cross[Dandelion] = Cross[Poppy] = true;
         Sprite[TallGrass] = Sprite[Dandelion] = Sprite[Poppy] = true;
+        Flammable(Tnt, 15, 100);
         Flammable(Planks, 5, 20); Flammable(Log, 5, 5); Flammable(Leaves, 30, 60);
         Flammable(TallGrass, 60, 100); Flammable(Dandelion, 60, 100); Flammable(Poppy, 60, 100);
     }

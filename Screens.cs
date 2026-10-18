@@ -464,8 +464,9 @@ public sealed class InventoryScreen : Screen
     static readonly byte[] Items = {
         Blk.Stone, Blk.Grass, Blk.Dirt, Blk.Cobble, Blk.Planks, Blk.Sand, Blk.Gravel, Blk.Log, Blk.Leaves,
         Blk.Sandstone, Blk.SnowGrass, Blk.Snow, Blk.Glass, Blk.Bricks, Blk.CoalOre, Blk.IronOre, Blk.GoldOre,
-        Blk.DiamondOre, Blk.Bedrock, Blk.Cactus, Blk.TallGrass, Blk.Dandelion, Blk.Poppy, Blk.Water, Blk.TorchFloor, Blk.FlintSteel };
-    const int PW = 176, PH = 136;
+        Blk.DiamondOre, Blk.Bedrock, Blk.Cactus, Blk.TallGrass, Blk.Dandelion, Blk.Poppy, Blk.Water, Blk.TorchFloor, Blk.FlintSteel,
+        Blk.Tnt, Blk.Bow, Blk.Arrow, Blk.ExplosiveArrow };
+    const int PW = 176, PH = 154;
     int px, py;
     protected override void Build() { px = (W - PW) / 2; py = (H - PH) / 2; }
     public override void Key(Keys k) { if (k == Keys.E || k == Keys.Escape) G.CloseScreen(); }
@@ -474,13 +475,13 @@ public sealed class InventoryScreen : Screen
         int cx = (mx - (px + 8)), cy = (my - (py + 18));
         if (cx < 0 || cy < 0) return -1;
         int c = cx / 18, r = cy / 18;
-        if (c >= 9 || r >= 3) return -1;
+        if (c >= 9 || r >= 4) return -1;
         int i = r * 9 + c;
         return i < Items.Length ? i : -1;
     }
     int HotbarAt(int mx, int my)
     {
-        int cx = mx - (px + 8), cy = my - (py + 112);
+        int cx = mx - (px + 8), cy = my - (py + 130);
         if (cx < 0 || cy < 0 || cy >= 18) return -1;
         int c = cx / 18;
         return c < 9 ? c : -1;
@@ -496,7 +497,7 @@ public sealed class InventoryScreen : Screen
     {
         Widgets.Panel(ui, px, py, PW, PH);
         ui.Text("Creative Inventory", px + 8, py + 6, 0xFF404040, false);
-        for (int i = 0; i < 27; i++)
+        for (int i = 0; i < 36; i++)
         {
             int x = px + 8 + (i % 9) * 18, y = py + 18 + (i / 9) * 18;
             Widgets.Slot(ui, x, y);
@@ -504,16 +505,16 @@ public sealed class InventoryScreen : Screen
         }
         for (int i = 0; i < 9; i++)
         {
-            int x = px + 8 + i * 18, y = py + 112;
+            int x = px + 8 + i * 18, y = py + 130;
             Widgets.Slot(ui, x, y);
             if (G.Hotbar[i] != Blk.Air) Icons.Block(ui, G.Renderer.AtlasTex, G.Hotbar[i], x + 1, y + 1, 16);
             if (i == G.Selected) { ui.Rect(x - 1, y - 1, 20, 1, 0xFFFFFFFF); ui.Rect(x - 1, y + 18, 20, 1, 0xFFFFFFFF); ui.Rect(x - 1, y - 1, 1, 20, 0xFFFFFFFF); ui.Rect(x + 18, y - 1, 1, 20, 0xFFFFFFFF); }
         }
-        ui.Text("Hotbar", px + 8, py + 102, 0xFF404040, false);
+        ui.Text("Hotbar", px + 8, py + 120, 0xFF404040, false);
         int hi = ItemAt(mx, my), hh = HotbarAt(mx, my);
         int slotX = -1, slotY = -1; byte hov = 0;
         if (hi >= 0) { slotX = px + 8 + (hi % 9) * 18; slotY = py + 18 + (hi / 9) * 18; hov = Items[hi]; }
-        else if (hh >= 0) { slotX = px + 8 + hh * 18; slotY = py + 112; hov = G.Hotbar[hh]; }
+        else if (hh >= 0) { slotX = px + 8 + hh * 18; slotY = py + 130; hov = G.Hotbar[hh]; }
         if (slotX >= 0)
         {
             ui.Rect(slotX + 1, slotY + 1, 16, 16, 0x80FFFFFF);

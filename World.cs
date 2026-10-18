@@ -235,6 +235,7 @@ public sealed partial class World
         byte b = GetBlock(x, y, z);
         int burn = Blk.BurnOdds[b];
         if (burn == 0 || rng.Next(chance) >= burn) return;
+        if (b == Blk.Tnt) { IgniteTnt(x, y, z); return; }
         if (rng.Next(age + 10) < 5 && CanFireStayAfterBurn(x, y, z)) { fireAge[(x, y, z)] = Math.Min(15, age + rng.Next(5) / 4); SetBlock(x, y, z, Blk.Fire, false); }
         else SetBlock(x, y, z, Blk.Air, false);
     }

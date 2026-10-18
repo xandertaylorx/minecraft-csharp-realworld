@@ -12,7 +12,7 @@ public sealed class Game : GameWindow
     public Renderer Renderer;
     public Settings Settings = Settings.Load();
     public double Time;
-    public readonly byte[] Hotbar = { Blk.Stone, Blk.Cobble, Blk.Dirt, Blk.Planks, Blk.Log, Blk.Glass, Blk.TorchFloor, Blk.Water, Blk.FlintSteel };
+    public readonly byte[] Hotbar = { Blk.Stone, Blk.Planks, Blk.Glass, Blk.TorchFloor, Blk.Water, Blk.FlintSteel, Blk.Tnt, Blk.Bow, Blk.ExplosiveArrow };
     public int Selected;
     public readonly ChatLog Chat = new();
     public bool DoDaylightCycle = true;
@@ -168,6 +168,7 @@ public sealed class Game : GameWindow
             world.Time = 1000;
         }
         P.FlySpeed = Settings.FlightSpeed;
+        world.Me = P;
         spectator = false;
         inGame = true;
         loading = new LoadingScreen();
@@ -347,7 +348,8 @@ public sealed class Game : GameWindow
         if (id == Blk.FlintSteel)
         {
             // light a fire in the cell next to the clicked face (or in place of a plant)
-            if (Blk.Cross[world.GetBlock(x, y, z)]) world.TryIgnite(x, y, z);
+            if (world.GetBlock(x, y, z) == Blk.Tnt) world.IgniteTnt(x, y, z);
+            else if (Blk.Cross[world.GetBlock(x, y, z)]) world.TryIgnite(x, y, z);
             else world.TryIgnite(px, py, pz);
             return;
         }
@@ -382,6 +384,7 @@ public sealed class Game : GameWindow
         if (DoDaylightCycle) world.Time++;
         world.TickScheduled();
         world.UpdateParticles();
+        world.UpdateEntities();
         var inp = new PlayerInput();
         if (screen == null)
         {

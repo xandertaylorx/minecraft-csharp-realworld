@@ -7,7 +7,7 @@ public static class Commands
     static readonly string[] Names =
     {
         "help", "give", "clear", "time", "gamemode", "tp", "teleport", "setblock", "fill", "seed", "say", "me", "kill",
-        "gamerule", "locate", "flightspeed", "fly", "reload", "save-all", "setworldspawn", "spawnpoint", "weather", "difficulty"
+        "gamerule", "locate", "flightspeed", "fly", "reload", "save-all", "setworldspawn", "spawnpoint", "weather", "difficulty", "summon", "explode"
     };
     static readonly string[] GameRules = { "doDaylightCycle", "doFireTick" };
     static readonly string[] TimeWords = { "day", "noon", "night", "midnight", "sunrise", "sunset" };
@@ -70,6 +70,8 @@ public static class Commands
                 case "save-all": g.SaveNow(); Ok(g, "Saved the game"); break;
                 case "setworldspawn": case "spawnpoint":
                     g.SpawnPoint = (p.X, p.Y, p.Z); Ok(g, $"Set the spawn point to {F(p.X)}, {F(p.Y)}, {F(p.Z)}"); break;
+                case "summon": Summon(g, a, w); break;
+                case "explode": Explode(g, a, w); break;
                 case "weather": Err(g, "Weather is not implemented in this version (always clear)."); break;
                 case "difficulty": Ok(g, "The difficulty is Peaceful (creative world)"); break;
                 default: Err(g, "Unknown or incomplete command, see below for error"); Err(g, "/" + string.Join(' ', a) + "<--[HERE]"); break;
@@ -95,6 +97,8 @@ public static class Commands
                 "gamerule" => "/gamerule <doDaylightCycle|doFireTick> [true|false]",
                 "locate" => "/locate biome <plains|forest|desert|snowy_plains|mountains|ocean|beach>",
                 "flightspeed" => "/flightspeed [<multiplier 0.1-20>|reset]",
+                "summon" => "/summon tnt [<x> <y> <z>] [<fuse ticks>]",
+                "explode" => "/explode [<x> <y> <z> [<power>]]",
                 _ => null
             };
             if (u != null) Ok(g, u); else Err(g, "Unknown command: " + c);
@@ -300,6 +304,33 @@ public static class Commands
         Err(g, "Could not find that biome within 2600 blocks");
     }
 
+    static void Summon(Game g, string[] a, World w)
+    {
+        if (a.Length < 2) { Err(g, "Usage: /summon <tnt> [<x> <y> <z>] [<fuse>]"); return; }
+        string what = a[1].ToLowerInvariant().Replace("minecraft:", "");
+        if (what != "tnt" && what != "tnt_minecart") { Err(g, "Unknown entity type '" + a[1] + "' (only tnt is supported)"); return; }
+        var p = g.Me;
+        double x = p.X, y = p.Y, z = p.Z;
+        if (a.Length >= 5 && Num(a[2], p.X, out x) && Num(a[3], p.Y, out y) && Num(a[4], p.Z, out z)) { }
+        else if (a.Length >= 5) { Err(g, "Expected coordinates"); return; }
+        int fuse = 80;
+        if (a.Length >= 6) int.TryParse(a[5], out fuse);
+        fuse = Math.Clamp(fuse, 1, 600);
+        w.PrimeTnt(x, y, z, fuse);
+        Ok(g, "Summoned new Primed TNT");
+    }
+
+    static void Explode(Game g, string[] a, World w)
+    {
+        var p = g.Me;
+        double x = p.X, y = p.Y, z = p.Z; float power = 4f;
+        if (a.Length >= 4) { if (!Num(a[1], p.X, out x) || !Num(a[2], p.Y, out y) || !Num(a[3], p.Z, out z)) { Err(g, "Expected coordinates"); return; } }
+        if (a.Length >= 5) float.TryParse(a[4], NumberStyles.Float, CultureInfo.InvariantCulture, out power);
+        power = Math.Clamp(power, 0.5f, 12f);
+        w.Explode(x, y, z, power);
+        Ok(g, "Created an explosion of power " + power.ToString("0.#", CultureInfo.InvariantCulture));
+    }
+
     static void FlightSpeed(Game g, string[] a)
     {
         var p = g.Me;
@@ -329,6 +360,7 @@ public static class Commands
             case "clear": if (idx == 1) AddFrom(new[] { "@s", "@p", "Player" }); else if (idx == 2) AddFrom(Blk.AllNames()); break;
             case "time": if (idx == 1) AddFrom(new[] { "set", "add", "query" }); else if (idx == 2 && a[1] == "set") AddFrom(TimeWords); else if (idx == 2 && a[1] == "query") AddFrom(new[] { "daytime", "gametime", "day" }); break;
             case "gamemode": if (idx == 1) AddFrom(new[] { "creative", "spectator" }); break;
+            case "summon": if (idx == 1) AddFrom(new[] { "tnt" }); break;
             case "gamerule": if (idx == 1) AddFrom(GameRules); else if (idx == 2) AddFrom(new[] { "true", "false" }); break;
             case "locate": if (idx == 1) AddFrom(new[] { "biome" }); else if (idx == 2) AddFrom(BiomeNames); break;
             case "setblock": if (idx == 4) AddFrom(Blk.AllNames()); else if (idx == 5) AddFrom(new[] { "destroy", "keep", "replace" }); break;
