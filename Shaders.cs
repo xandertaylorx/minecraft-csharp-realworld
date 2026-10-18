@@ -73,7 +73,7 @@ void main(){
     if (uUnder == 1) light += vec3(0.04, 0.12, 0.17) * (0.15 + uAmbSky.b);
     if (uUnder == 1) light *= 1.0 + caustic((vPos.xz + uCamXZ)*0.9, uTime) * 0.9 * (0.3 + 0.7*sunMask) * (0.4 + 0.6*ndl);
     col = albedo * light;
-    if (vBlk > 1.2) { float e = smoothstep(0.55, 0.85, max(albedo.r, albedo.g)); col += albedo * e * 2.3; }
+    if (vBlk > 1.2) { float e = smoothstep(0.55, 0.85, max(albedo.r, albedo.g)); col += albedo * e * 1.0; }
     vec3 V = normalize(vPos);
     float sunAmt = pow(max(dot(V, uLightDir), 0.0), 6.0);
     fogc = uFogColor + uHaze * sunAmt;
@@ -353,8 +353,8 @@ void main(){
   if (r2 > 1.0) discard;
   float ph = vParams.z;
   float fl = 0.86 + 0.14*sin(uTime*13.0+ph) + 0.06*sin(uTime*31.0+ph*2.3);
-  float core = exp(-r2*16.0), halo = exp(-r2*3.4)*0.5;
+  float core = exp(-r2*22.0), halo = exp(-r2*4.2)*0.32;
   float edge = 1.0 - smoothstep(0.55, 1.0, r2);
-  FragColor = vec4(vColor * (core*1.7 + halo) * vParams.y * fl * edge, 1.0);
+  FragColor = vec4(vColor * (core*1.0 + halo) * vParams.y * fl * edge, 1.0);
 }";
 }

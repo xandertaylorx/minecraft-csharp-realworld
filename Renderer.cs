@@ -275,13 +275,13 @@ public sealed class Renderer
                     int lx = idx & 15, lz = (idx >> 4) & 15, ly = idx >> 8;
                     byte id = ch.Blocks[idx];
                     float cx, cy, cz, size, inten; Vector3 col;
-                    if (id == Blk.Fire) { cx = lx + 0.5f; cy = ly + 0.55f; cz = lz + 0.5f; size = 2.1f; inten = 0.65f; col = new Vector3(1.0f, 0.42f, 0.10f); }
+                    if (id == Blk.Fire) { cx = lx + 0.5f; cy = ly + 0.55f; cz = lz + 0.5f; size = 1.7f; inten = 0.40f; col = new Vector3(1.0f, 0.42f, 0.10f); }
                     else if (Blk.TorchT[id])
                     {
                         int tdx = id == Blk.TorchPX ? 1 : id == Blk.TorchNX ? -1 : 0, tdz = id == Blk.TorchPZ ? 1 : id == Blk.TorchNZ ? -1 : 0;
                         bool wall = id != Blk.TorchFloor;
                         cx = lx + 0.5f + tdx * 0.08f; cy = ly + (wall ? 0.22f : 0f) + 0.70f; cz = lz + 0.5f + tdz * 0.08f;
-                        size = 1.45f; inten = 0.80f; col = new Vector3(1.0f, 0.52f, 0.18f);
+                        size = 1.05f; inten = 0.42f; col = new Vector3(1.0f, 0.50f, 0.16f);
                     }
                     else continue;
                     float rx = (float)(ch.X * 16 + cx - cam.Pos.X), ry = (float)(cy - cam.Pos.Y), rz = (float)(ch.Z * 16 + cz - cam.Pos.Z);
@@ -547,7 +547,7 @@ public sealed class Renderer
         GL.Viewport(0, 0, W, H);
         post.Use();
         post.Set("uScene", 0); post.Set("uBloom", 1); post.Set("uDepth", 2);
-        post.Set("uShaders", sh ? 1 : 0); post.Set("uBloomOn", bloomOn ? 1 : 0); post.Set("uBloomI", 0.38f); post.Set("uUnder", underwater ? 1 : 0);
+        post.Set("uShaders", sh ? 1 : 0); post.Set("uBloomOn", bloomOn ? 1 : 0); post.Set("uBloomI", 0.28f); post.Set("uUnder", underwater ? 1 : 0);
         post.Set("uScreen", W, H);
         // god rays
         var sv = new Vector3(at.SunDir.X * view.M11 + at.SunDir.Y * view.M21 + at.SunDir.Z * view.M31,
