@@ -538,7 +538,7 @@ public sealed class ResourcePackScreen : Screen
     public override bool DirtBg => true;
     public ResourcePackScreen(Screen p) { parent = p; }
     int ListTop => 36;
-    int ListBottom => H - 58;
+    int ListBottom => H - 106;
     int LeftX => W / 2 - 205;
     int RightX => W / 2 + 5;
     const int ListW = 200;
@@ -562,6 +562,9 @@ public sealed class ResourcePackScreen : Screen
             sel = G.Settings.ResourcePacks.Distinct().Select(n => all.FirstOrDefault(a => a.Name == n)).Where(a => a != null).ToList();
             avail = all.Where(a => !sel.Contains(a)).ToList();
         }
+        var dl = new Btn(W / 2 - 154, H - 76, 308, 20, "", () => { if (!LuantiPack.Running) LuantiPack.Start(); });
+        dl.Text = "Download Open-Source Pack (Luanti, CC BY-SA)";
+        Buttons.Add(dl);
         Buttons.Add(new Btn(W / 2 - 154, H - 52, 150, 20, "Open Pack Folder", ResourcePacks.OpenFolder));
         Buttons.Add(new Btn(W / 2 + 4, H - 52, 150, 20, "Done", Done));
         Buttons.Add(new Btn(W / 2 - 154, H - 28, 150, 20, "Refresh Packs", Refresh));
@@ -659,8 +662,22 @@ public sealed class ResourcePackScreen : Screen
         ui.GradientRect(lx, ListBottom - 4, ListW, 4, 0x00000000, 0xFF000000);
     }
 
+    void AfterDownload()
+    {
+        LuantiPack.Finished = false;
+        if (!LuantiPack.Success) return;
+        var names = sel.Select(p => p.Name).ToList();
+        all = ResourcePacks.Discover();
+        var fresh = all.FirstOrDefault(a => a.Name == LuantiPack.PackName);
+        if (fresh != null && !names.Contains(fresh.Name)) names.Insert(0, fresh.Name);
+        sel = names.Select(n => all.FirstOrDefault(a => a.Name == n)).Where(a => a != null).ToList();
+        avail = all.Where(a => !sel.Contains(a)).ToList();
+        Commit();
+    }
+
     protected override void DrawContent(UiBatch ui, int mx, int my)
     {
+        if (LuantiPack.Finished) AfterDownload();
         ui.TextCentered("Select Resource Packs", W / 2f, 10);
         DrawList(ui, LeftX, scrollA, avail, false, mx, my, "Available Resource Packs");
         DrawList(ui, RightX, scrollS, sel, true, mx, my, "Selected Resource Packs");
@@ -670,7 +687,8 @@ public sealed class ResourcePackScreen : Screen
             ui.TextCentered("Click 'Open Pack Folder' and drop", LeftX + ListW / 2f, ListTop + 28, 0xFF808080);
             ui.TextCentered(".zip packs or folders in.", LeftX + ListW / 2f, ListTop + 38, 0xFF808080);
         }
-        ui.TextCentered("Top pack overrides the ones below.", W / 2f, H - 80, 0xFF707070);
-        ui.TextCentered("Minecraft Java packs work (16x - 128x).", W / 2f, H - 70, 0xFF707070);
+        string st = LuantiPack.Status;
+        if (st.Length > 0) ui.TextCentered(st, W / 2f, H - 96, LuantiPack.Running ? 0xFFFFFFA0 : LuantiPack.Success ? 0xFF80FF80 : 0xFFFF8080);
+        else ui.TextCentered("Top pack overrides the ones below. Minecraft Java packs work (16x - 128x).", W / 2f, H - 96, 0xFF707070);
     }
 }

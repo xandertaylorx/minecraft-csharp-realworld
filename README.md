@@ -37,7 +37,13 @@ The game loads **Minecraft Java Edition resource packs** the same way Minecraft 
 
 Supported: 16x up to 128x textures, animated textures (`*.png.mcmeta` with `frametime` / `frames`), biome-tinted grass,
 leaves and water, the grass side overlay, and both the modern (`block/`) and legacy (`blocks/`) texture names.
-Without a pack the built-in generated textures are used. The pack folder lives in your user data directory
+Without a pack the built-in generated textures are used.
+
+**One-click open-source pack:** the pack screen has a *Download Open-Source Pack (Luanti, CC BY-SA)* button. It fetches the
+default textures of [Luanti's Minetest Game](https://github.com/luanti-org/minetest_game) (CC BY-SA 3.0) straight from GitHub,
+converts them into a Minecraft-layout pack (gray biome-tinted grass/leaves/water, ores composited on stone, animated water and fire)
+and activates it. The credits and licence text are saved inside the pack folder. Nothing from it is committed to this repo.
+ The pack folder lives in your user data directory
 (`~/Library/Application Support/McClone/resourcepacks` on macOS), so no third-party art ever ends up in this repo.
 
 ## Features
