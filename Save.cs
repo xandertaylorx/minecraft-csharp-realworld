@@ -15,6 +15,7 @@ public sealed class Settings
     public int Fov = 70, RenderDist = 10, GuiScale = 0;
     public float Sensitivity = 0.5f;
     public bool Clouds = true, VSync = true, Bobbing = true;
+    public float FlightSpeed = 1f;
     public List<string> ResourcePacks = new();   // highest priority first
 
     static string PathFile => Path.Combine(SaveIO.RootDir, "options.txt");
@@ -38,6 +39,7 @@ public sealed class Settings
                         case "clouds": s.Clouds = v == "true"; break;
                         case "vsync": s.VSync = v == "true"; break;
                         case "bobbing": s.Bobbing = v == "true"; break;
+                        case "flightSpeed": s.FlightSpeed = Math.Clamp(float.Parse(v, System.Globalization.CultureInfo.InvariantCulture), 0.1f, 20f); break;
                         case "resourcePacks": s.ResourcePacks = v.Split('|', StringSplitOptions.RemoveEmptyEntries).Distinct().ToList(); break;
                     }
                 }
@@ -45,8 +47,10 @@ public sealed class Settings
         catch { }
         return s;
     }
+    public static bool Disabled;   // screenshot/test runs must not touch the player's options
     public void Save()
     {
+        if (Disabled) return;
         try
         {
             Directory.CreateDirectory(SaveIO.RootDir);
@@ -55,6 +59,7 @@ public sealed class Settings
                 $"fov:{Fov}", $"renderDistance:{RenderDist}", $"guiScale:{GuiScale}",
                 $"sensitivity:{Sensitivity.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 $"clouds:{(Clouds ? "true" : "false")}", $"vsync:{(VSync ? "true" : "false")}", $"bobbing:{(Bobbing ? "true" : "false")}",
+                $"flightSpeed:{FlightSpeed.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 $"resourcePacks:{string.Join("|", ResourcePacks)}"
             });
         }

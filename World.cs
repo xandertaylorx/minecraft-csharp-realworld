@@ -187,6 +187,7 @@ public sealed class World
 
     // ------------------------------------------------------------------ scheduled block ticks (fluids, fire)
     public const int WaterDelay = 5;
+    public bool DoFireTick = true;
     readonly PriorityQueue<(int, int, int), long> tickQ = new();
     readonly HashSet<(int, int, int)> tickSet = new();
     public void Schedule(int x, int y, int z, int delay)
@@ -247,6 +248,7 @@ public sealed class World
 
     void UpdateFire(int x, int y, int z)
     {
+        if (!DoFireTick) { Schedule(x, y, z, 60); return; }
         var key = (x, y, z);
         // water puts fire out
         for (int d = 0; d < 6; d++)

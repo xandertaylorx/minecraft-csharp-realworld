@@ -94,6 +94,30 @@ public static class Blk
         Flammable(Planks, 5, 20); Flammable(Log, 5, 5); Flammable(Leaves, 30, 60);
         Flammable(TallGrass, 60, 100); Flammable(Dandelion, 60, 100); Flammable(Poppy, 60, 100);
     }
+    static Dictionary<string, byte> byName;
+    /// <summary>Looks a block/item up by Minecraft-style id ("minecraft:oak_planks", "stone"...). Returns -1 when unknown.</summary>
+    public static int ByName(string s)
+    {
+        if (byName == null)
+        {
+            byName = new Dictionary<string, byte>();
+            for (int i = 0; i < 256; i++)
+                if (Name[i] != null && !(i >= Flow1 && i <= Falling) && !(i >= TorchPX && i <= TorchNZ))
+                    byName[Name[i].ToLowerInvariant().Replace(' ', '_')] = (byte)i;
+            byName["planks"] = Planks; byName["grass"] = Grass; byName["log"] = Log; byName["leaves"] = Leaves;
+            byName["snow"] = Snow; byName["tall_grass"] = TallGrass; byName["grass_block"] = Grass; byName["cobble"] = Cobble;
+            byName["flowing_water"] = Falling; byName["wall_torch"] = TorchFloor; byName["redstone_torch"] = TorchFloor;
+            byName["short_grass"] = TallGrass; byName["flint_steel"] = FlintSteel;
+        }
+        s = s.ToLowerInvariant();
+        if (s.StartsWith("minecraft:")) s = s.Substring(10);
+        return byName.TryGetValue(s, out var id) ? id : -1;
+    }
+    public static IEnumerable<string> AllNames()
+    {
+        ByName("stone");
+        return byName.Keys.OrderBy(k => k);
+    }
     public static bool IsReplaceable(byte b) => b == Air || WaterT[b] || Cross[b] || b == Fire;
     public static bool Flammable(byte b) => FlameOdds[b] > 0;
 }

@@ -14,6 +14,8 @@ public sealed class Player
     public float Yaw, Pitch;
     public bool OnGround, InWater, EyeInWater, Sprinting, Sneaking, Flying, HorizColl;
     public double Height = 1.8, EyeH = 1.62;
+    public float FlySpeed = 1f;      // /flightspeed multiplier
+    public bool Noclip;              // spectator mode
     public float WalkDist, PrevWalkDist, BobAmt, PrevBobAmt;
     const double HalfW = 0.3;
     const double Eps = 1e-7;
@@ -23,6 +25,7 @@ public sealed class Player
     public void Tick(World w, PlayerInput inp)
     {
         PX = X; PY = Y; PZ = Z;
+        if (!w.IsLoaded((int)Math.Floor(X), (int)Math.Floor(Z))) return;   // wait for the chunk after a teleport
         PrevWalkDist = WalkDist; PrevBobAmt = BobAmt;
         Sneaking = inp.Sneak && !Flying;
         Height = Sneaking ? 1.5 : 1.8;
@@ -39,13 +42,13 @@ public sealed class Player
 
         if (Flying)
         {
-            float accel = 0.05f * (Sprinting ? 2f : 1f);
-            if (inp.Jump) MY += 0.15;
-            if (inp.Sneak) MY -= 0.15;
+            float accel = 0.05f * (Sprinting ? 2f : 1f) * FlySpeed;
+            if (inp.Jump) MY += 0.15 * FlySpeed;
+            if (inp.Sneak) MY -= 0.15 * FlySpeed;
             MoveRelative(s, f, accel);
             Move(w, MX, MY, MZ);
             MX *= 0.91; MZ *= 0.91; MY *= 0.6;
-            if (OnGround) Flying = false;
+            if (OnGround && !Noclip) Flying = false;
         }
         else if (InWater)
         {
@@ -161,6 +164,7 @@ public sealed class Player
 
     void Move(World w, double dx, double dy, double dz)
     {
+        if (Noclip) { X += dx; Y += dy; Z += dz; OnGround = false; HorizColl = false; return; }
         double ox = dx, oy = dy, oz = dz;
         if (Sneaking && OnGround)
         {

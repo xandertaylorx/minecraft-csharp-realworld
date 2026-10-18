@@ -14,6 +14,27 @@ public sealed class Game : GameWindow
     public double Time;
     public readonly byte[] Hotbar = { Blk.Stone, Blk.Cobble, Blk.Dirt, Blk.Planks, Blk.Log, Blk.Glass, Blk.TorchFloor, Blk.Water, Blk.FlintSteel };
     public int Selected;
+    public readonly ChatLog Chat = new();
+    public bool DoDaylightCycle = true;
+    public (double x, double y, double z)? SpawnPoint;
+    public World CurWorld => world;
+    public Player Me => P;
+    bool spectator;
+    public void Say(string text, uint color = 0xFFFFFFFF) => Chat.Add(text, color, Time, Ui);
+    public void SaveNow() => SaveGame();
+    public void SetSpectator(bool on) { spectator = on; P.Noclip = on; if (on) { P.Flying = true; } }
+    public void GiveToHotbar(byte id)
+    {
+        for (int i = 0; i < 9; i++) if (Hotbar[i] == id) { Selected = i; return; }
+        for (int i = 0; i < 9; i++) if (Hotbar[i] == Blk.Air) { Hotbar[i] = id; Selected = i; return; }
+        Hotbar[Selected] = id;
+    }
+    public void Respawn()
+    {
+        if (SpawnPoint.HasValue) { var s = SpawnPoint.Value; P.SetPos(s.x, s.y, s.z); return; }
+        var (sx, sz) = FindSpawn(world.Gen);
+        P.SetPos(sx + 0.5, Math.Max(world.Gen.Column(sx, sz).H, TerrainGen.SeaLevel) + 1.01, sz + 0.5);
+    }
 
     World world, pano;
     Player P = new();
@@ -38,11 +59,13 @@ public sealed class Game : GameWindow
     // --shot mode
     readonly string[] args; bool shotLuanti;
     string shotPath, shotScene = "title", shotScreen; int shotDelay = 40; int shotFrames; bool shotPlaced;
+    readonly List<string> shotCmds = new(); string shotChat;
     readonly List<(int, int, int, byte)> shotSets = new(); readonly List<int[]> shotFills = new(); double[] shotPos; float[] shotRot; long shotSeed = 1234; long shotTime = -1; bool shotFly;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws, string[] args) : base(gws, nws)
     {
         this.args = args;
+        Settings.Disabled = args.Contains("--shot");
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -57,6 +80,8 @@ public sealed class Game : GameWindow
                 case "--debug": showDebug = true; break;
                 case "--pos": shotPos = new[] { double.Parse(args[++i]), double.Parse(args[++i]), double.Parse(args[++i]) }; break;
                 case "--rot": shotRot = new[] { float.Parse(args[++i]), float.Parse(args[++i]) }; break;
+                case "--cmd": shotCmds.Add(args[++i]); break;
+                case "--chat": shotChat = args[++i]; break;
                 case "--luanti": shotLuanti = true; break;
                 case "--pack": { var pn = args[++i]; Settings.ResourcePacks.Remove(pn); Settings.ResourcePacks.Add(pn); break; }
                 case "--rd": Settings.RenderDist = int.Parse(args[++i]); break;
@@ -139,8 +164,11 @@ public sealed class Game : GameWindow
             P.Yaw = 0; P.Pitch = 10;
             world.Time = 1000;
         }
+        P.FlySpeed = Settings.FlightSpeed;
+        spectator = false;
         inGame = true;
         loading = new LoadingScreen();
+        Chat.Lines.Clear();
         SetScreen(loading);
     }
 
@@ -212,6 +240,8 @@ public sealed class Game : GameWindow
         if (!inGame) return;
         if (k == Keys.Escape) { SaveGame(); SetScreen(new PauseScreen()); return; }
         if (k == Keys.E) { SetScreen(new InventoryScreen()); return; }
+        if (k == Keys.T) { SetScreen(new ChatScreen("", true)); return; }
+        if (k == Keys.Slash || k == Keys.KeyPadDivide) { SetScreen(new ChatScreen("/", true)); return; }
         if (k == Keys.F3) showDebug = !showDebug;
         if (k == Keys.F1) hideHud = !hideHud;
         if (k >= Keys.D1 && k <= Keys.D9) Selected = k - Keys.D1;
@@ -299,14 +329,14 @@ public sealed class Game : GameWindow
     }
     void BreakBlock()
     {
-        if (screen != null || !inGame || !Pick(out int x, out int y, out int z, out _, out _, out _)) return;
+        if (screen != null || !inGame || spectator || !Pick(out int x, out int y, out int z, out _, out _, out _)) return;
         byte b = world.GetBlock(x, y, z);
         if (b == Blk.Bedrock && false) return;
         world.SetBlock(x, y, z, Blk.Air);
     }
     void PlaceBlock()
     {
-        if (screen != null || !inGame || !Pick(out int x, out int y, out int z, out int nx, out int ny, out int nz)) return;
+        if (screen != null || !inGame || spectator || !Pick(out int x, out int y, out int z, out int nx, out int ny, out int nz)) return;
         byte id = Hotbar[Selected];
         if (id == Blk.Air) return;
         int px = x + nx, py = y + ny, pz = z + nz;
@@ -345,7 +375,7 @@ public sealed class Game : GameWindow
     void Tick()
     {
         tickCount++;
-        world.Time++;
+        if (DoDaylightCycle) world.Time++;
         world.TickScheduled();
         var inp = new PlayerInput();
         if (screen == null)
@@ -366,7 +396,7 @@ public sealed class Game : GameWindow
         float tgt = P.Sprinting ? 1.12f : 1f;
         fovMod += (tgt - fovMod) * 0.5f;
         if (ignoreMouse > 0) ignoreMouse--;
-        Renderer.Animate(world.Time);
+        Renderer.Animate(tickCount);
     }
 
     Cam MakeCam(float pt)
@@ -443,7 +473,7 @@ public sealed class Game : GameWindow
             if (screen.DirtBg) Widgets.Dirt(Ui, Renderer.AtlasTex, Ui.W, Ui.H);
             else if (screen.DimBg) Ui.GradientRect(0, 0, Ui.W, Ui.H, 0xA0101010, 0xB0101010);
         }
-        if (inGame && world != null && !hideHud && (screen == null || screen is InventoryScreen || screen is PauseScreen)) DrawHud();
+        if (inGame && world != null && !hideHud && (screen == null || screen is InventoryScreen || screen is PauseScreen || screen is ChatScreen)) DrawHud();
         if (screen != null)
         {
             if (screen.DimBg && inGame) Ui.GradientRect(0, 0, Ui.W, Ui.H, 0x60101010, 0x70101010);
@@ -501,7 +531,21 @@ public sealed class Game : GameWindow
         Ui.Rect(sx + 3, y + 2, 18, 18, 0xFF8B8B8B);
         for (int i = 0; i < 9; i++)
             if (Hotbar[i] != Blk.Air) Icons.Block(Ui, Renderer.AtlasTex, Hotbar[i], x + 3 + i * 20, y + 3, 16);
-        if (screen == null && Hotbar[Selected] != Blk.Air && false) Ui.TextCentered(Blk.Name[Hotbar[Selected]], W / 2, y - 18);
+        if (!(screen is ChatScreen))
+        {
+            float cy = H - 40;
+            for (int i = Chat.Lines.Count - 1, shown = 0; i >= 0 && shown < 8; i--, shown++)
+            {
+                var l = Chat.Lines[i];
+                double age = Time - l.Time;
+                if (age > 10) break;
+                float a = age > 9 ? (float)(10 - age) : 1f;
+                uint al = (uint)(a * 255) << 24;
+                Ui.Rect(2, cy - 1, Math.Min(W - 4, Ui.TextWidth(l.Text) + 4), 9, 0x80000000 & 0xFF000000 | ((uint)(a * 128) << 24));
+                Ui.Text(l.Text, 4, cy, (l.Color & 0x00FFFFFF) | al);
+                cy -= 9;
+            }
+        }
     }
 
     void DrawDebug()
@@ -589,6 +633,8 @@ public sealed class Game : GameWindow
                     for (int fz = Math.Min(f[2], f[5]); fz <= Math.Max(f[2], f[5]); fz++)
                         for (int fx = Math.Min(f[0], f[3]); fx <= Math.Max(f[0], f[3]); fx++) world.SetBlock(fx, fy, fz, (byte)f[6]);
             foreach (var (sx, sy, sz, sid) in shotSets) world.SetBlock(sx, sy, sz, sid);
+            foreach (var c in shotCmds) { Say("> " + c, 0xFFAAAAAA); Commands.Run(this, c); }
+            if (shotChat != null) SetScreen(new ChatScreen(shotChat, false));
             if (shotScreen != null) ApplyShotScreen();
             return;
         }
