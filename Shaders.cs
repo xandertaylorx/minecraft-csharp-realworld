@@ -357,4 +357,33 @@ void main(){
   float edge = 1.0 - smoothstep(0.55, 1.0, r2);
   FragColor = vec4(vColor * (core*1.0 + halo) * vParams.y * fl * edge, 1.0);
 }";
+
+    // ---------------------------------------------------------------- particles (block debris, smoke)
+    public const string PartVS = @"#version 330 core
+layout(location=0) in vec3 aCenter; layout(location=1) in vec2 aCorner; layout(location=2) in vec2 aUV;
+layout(location=3) in vec3 aTint; layout(location=4) in vec3 aLight; layout(location=5) in vec3 aP;
+uniform mat4 uVP; uniform vec3 uRight; uniform vec3 uUp;
+out vec2 vC; out vec2 vUV; out vec3 vTint; out vec3 vLight; out vec3 vP;
+void main(){
+  vec3 p = aCenter + (uRight*aCorner.x + uUp*aCorner.y)*aP.x;
+  gl_Position = uVP*vec4(p,1.0); vC = aCorner; vUV = aUV; vTint = aTint; vLight = aLight; vP = aP;
+}";
+    public const string PartFS = @"#version 330 core
+in vec2 vC; in vec2 vUV; in vec3 vTint; in vec3 vLight; in vec3 vP;
+uniform sampler2D uTex; uniform float uMode; out vec4 FragColor;
+float h21(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233)))*43758.5453); }
+void main(){
+  if (uMode < 0.5) {
+    vec4 t = texture(uTex, vUV);
+    if (t.a < 0.4) discard;
+    float mask = clamp((1.0 - t.a) * 255.0 / 55.0, 0.0, 1.0);
+    FragColor = vec4(t.rgb * mix(vec3(1.0), vTint, mask) * vLight, 1.0);
+  } else {
+    float r2 = dot(vC, vC);
+    if (r2 > 1.0) discard;
+    float n = h21(floor(vC*3.5 + vP.z*7.0));
+    float a = (1.0 - r2) * (0.5 + 0.5*n) * vP.y;
+    FragColor = vec4(vTint * vLight, a);
+  }
+}";
 }

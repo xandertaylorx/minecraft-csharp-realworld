@@ -58,7 +58,8 @@ public struct Atmos
 
 public sealed class Renderer
 {
-    Shader terrain, sky, cloud, line, shadowSh, water, bloomSh, post, glow;
+    Shader terrain, sky, cloud, line, shadowSh, water, bloomSh, post, glow, part;
+    int partVao, partVbo;
     int atlasTex, cloudTex, ebo, emptyVao, lineVao, lineVbo, glowVao, glowVbo;
     List<Anim> anims = new();
     public int TileSize = 16;
@@ -101,6 +102,7 @@ public sealed class Renderer
         bloomSh = new Shader(Glsl.FullscreenVS, Glsl.BloomFS);
         post = new Shader(Glsl.FullscreenVS, Glsl.PostFS);
         glow = new Shader(Glsl.GlowVS, Glsl.GlowFS);
+        part = new Shader(Glsl.PartVS, Glsl.PartFS);
 
         var idx = new uint[Mesher.MaxQuads * 6];
         for (int i = 0; i < Mesher.MaxQuads; i++) { uint b = (uint)(i * 4); idx[i * 6] = b; idx[i * 6 + 1] = b + 1; idx[i * 6 + 2] = b + 2; idx[i * 6 + 3] = b; idx[i * 6 + 4] = b + 2; idx[i * 6 + 5] = b + 3; }
@@ -124,6 +126,20 @@ public sealed class Renderer
         GL.EnableVertexAttribArray(1); GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, st, 12);
         GL.EnableVertexAttribArray(2); GL.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, st, 20);
         GL.EnableVertexAttribArray(3); GL.VertexAttribPointer(3, 3, VertexAttribPointerType.Float, false, st, 32);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, ebo);
+        GL.BindVertexArray(0);
+        // particles
+        partVao = GL.GenVertexArray(); partVbo = GL.GenBuffer();
+        GL.BindVertexArray(partVao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, partVbo);
+        GL.BufferData(BufferTarget.ArrayBuffer, PartMax * 4 * PartStride * 4, IntPtr.Zero, BufferUsageHint.DynamicDraw);
+        int ps = PartStride * 4;
+        GL.EnableVertexAttribArray(0); GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, ps, 0);
+        GL.EnableVertexAttribArray(1); GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, ps, 12);
+        GL.EnableVertexAttribArray(2); GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, ps, 20);
+        GL.EnableVertexAttribArray(3); GL.VertexAttribPointer(3, 3, VertexAttribPointerType.Float, false, ps, 28);
+        GL.EnableVertexAttribArray(4); GL.VertexAttribPointer(4, 3, VertexAttribPointerType.Float, false, ps, 40);
+        GL.EnableVertexAttribArray(5); GL.VertexAttribPointer(5, 3, VertexAttribPointerType.Float, false, ps, 52);
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, ebo);
         GL.BindVertexArray(0);
         EnsureShadowMap(2);
@@ -257,7 +273,7 @@ public sealed class Renderer
     readonly List<WaterDraw> waterList = new();
 
     // ------------------------------------------------------------------ glow sprites (torches / fire)
-    const int GlowMax = 600, GlowStride = 11;
+    const int GlowMax = 2400, GlowStride = 11;
     readonly float[] glowData = new float[GlowMax * 4 * GlowStride];
 
     int BuildGlow(World w, in Cam cam, Matrix4 view)
@@ -300,7 +316,109 @@ public sealed class Renderer
                     n++;
                 }
             }
+        foreach (var p in w.Particles)
+        {
+            if (p.Kind < 2 || n >= GlowMax) continue;
+            float rx = p.X - (float)cam.Pos.X, ry = p.Y - (float)cam.Pos.Y, rz = p.Z - (float)cam.Pos.Z;
+            if (rx * rx + ry * ry + rz * rz > 90f * 90f) continue;
+            float life = 1f - p.Age / (float)p.Max;
+            float inten = p.Alpha * life * (p.Kind == 3 ? 1f : life);
+            int o = n * 4 * GlowStride;
+            for (int k = 0; k < 4; k++)
+            {
+                float cxn = (k == 1 || k == 2) ? 1f : -1f, cyn = k >= 2 ? 1f : -1f;
+                int oo = o + k * GlowStride;
+                glowData[oo] = rx; glowData[oo + 1] = ry; glowData[oo + 2] = rz;
+                glowData[oo + 3] = cxn; glowData[oo + 4] = cyn;
+                glowData[oo + 5] = p.Size; glowData[oo + 6] = inten; glowData[oo + 7] = p.Age * 0.7f;
+                glowData[oo + 8] = p.TR; glowData[oo + 9] = p.TG; glowData[oo + 10] = p.TB;
+            }
+            n++;
+        }
         return n;
+    }
+
+    // ------------------------------------------------------------------ particles
+    const int PartMax = 8000, PartStride = 16;
+    readonly float[] partDebris = new float[PartMax * 4 * PartStride], partSmoke = new float[PartMax * 4 * PartStride];
+
+    static Vector3 ParticleLight(float sky, float blk, in Atmos at, bool sh, float dark)
+    {
+        float sk = sky * sky * (1.15f - 0.15f * sky);
+        Vector3 col;
+        if (sh) col = (at.AmbSky + at.LightColor * 0.6f) * sk + new Vector3(1f, 0.58f, 0.24f) * (blk / (2.2f - 1.2f * blk)) * 1.35f;
+        else
+        {
+            float sl = sky * at.LightDay, sb = sl / (4f - 3f * sl), bb = blk / (4f - 3f * blk);
+            col = new Vector3(0.04f + 0.96f * Math.Max(sb, bb)) * at.NightTint;
+        }
+        return col * dark + new Vector3(0.012f);
+    }
+
+    static int PutPart(float[] a, int n, float cx, float cy, float cz, float u0, float v0, float du, Vector3 tint, Vector3 light, float size, float alpha, float phase)
+    {
+        int o = n * 4 * PartStride;
+        for (int k = 0; k < 4; k++)
+        {
+            float cxn = (k == 1 || k == 2) ? 1f : -1f, cyn = k >= 2 ? 1f : -1f;
+            int oo = o + k * PartStride;
+            a[oo] = cx; a[oo + 1] = cy; a[oo + 2] = cz; a[oo + 3] = cxn; a[oo + 4] = cyn;
+            a[oo + 5] = u0 + (cxn > 0 ? du : 0f); a[oo + 6] = v0 + (cyn > 0 ? 0f : du);
+            a[oo + 7] = tint.X; a[oo + 8] = tint.Y; a[oo + 9] = tint.Z;
+            a[oo + 10] = light.X; a[oo + 11] = light.Y; a[oo + 12] = light.Z;
+            a[oo + 13] = size; a[oo + 14] = alpha; a[oo + 15] = phase;
+        }
+        return n + 1;
+    }
+
+    void DrawParticles(World w, in Cam cam, Matrix4 view, Matrix4 vp, in Atmos at, float partial, bool sh)
+    {
+        int nd = 0, ns = 0;
+        foreach (var p in w.Particles)
+        {
+            if (p.Kind > 1) continue;
+            float rx = p.X + p.VX * partial - (float)cam.Pos.X, ry = p.Y + p.VY * partial - (float)cam.Pos.Y, rz = p.Z + p.VZ * partial - (float)cam.Pos.Z;
+            if (rx * rx + ry * ry + rz * rz > 80f * 80f) continue;
+            if (p.Kind == 0)
+            {
+                if (nd >= PartMax) continue;
+                nd = PutPart(partDebris, nd, rx, ry, rz, p.U0, p.V0, p.DU, new Vector3(p.TR, p.TG, p.TB), ParticleLight(p.Sky, p.Blk, at, sh, 0.62f), p.Size, 1f, 0f);
+            }
+            else
+            {
+                if (ns >= PartMax) continue;
+                float life = 1f - p.Age / (float)p.Max;
+                var lit = ParticleLight(Math.Max(p.Sky, 0.35f), p.Blk, at, sh, 1f);
+                ns = PutPart(partSmoke, ns, rx, ry, rz, 0, 0, 0, new Vector3(p.TR, p.TG, p.TB), lit, p.Size, p.Alpha * life, p.Age * 0.37f);
+            }
+        }
+        if (nd == 0 && ns == 0) return;
+        part.Use();
+        part.Set("uVP", vp);
+        part.Set("uRight", view.M11, view.M21, view.M31);
+        part.Set("uUp", view.M12, view.M22, view.M32);
+        part.Set("uTex", 0);
+        GL.ActiveTexture(TextureUnit.Texture0); GL.BindTexture(TextureTarget.Texture2D, atlasTex);
+        GL.BindVertexArray(partVao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, partVbo);
+        GL.Disable(EnableCap.CullFace);
+        if (nd > 0)
+        {
+            part.Set("uMode", 0f);
+            GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, nd * 4 * PartStride * 4, partDebris);
+            GL.DrawElements(PrimitiveType.Triangles, nd * 6, DrawElementsType.UnsignedInt, 0);
+        }
+        if (ns > 0)
+        {
+            part.Set("uMode", 1f);
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            GL.DepthMask(false);
+            GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, ns * 4 * PartStride * 4, partSmoke);
+            GL.DrawElements(PrimitiveType.Triangles, ns * 6, DrawElementsType.UnsignedInt, 0);
+            GL.DepthMask(true);
+            GL.Disable(EnableCap.Blend);
+        }
     }
 
     // ------------------------------------------------------------------ main entry
@@ -491,6 +609,8 @@ public sealed class Renderer
                 GL.Disable(EnableCap.Blend);
             }
         }
+
+        DrawParticles(w, cam, view, vp, at, partial, sh);
 
         // ---- 4. clouds + glow sprites (blended into the HDR buffer)
         GL.Enable(EnableCap.Blend);

@@ -59,7 +59,7 @@ public sealed class Game : GameWindow
     // --shot mode
     readonly string[] args; bool shotLuanti;
     string shotPath, shotScene = "title", shotScreen; int shotDelay = 40; int shotFrames; bool shotPlaced;
-    readonly List<string> shotCmds = new(); string shotChat;
+    readonly List<int[]> shotBreaks = new(); readonly List<string> shotCmds = new(); string shotChat;
     readonly List<(int, int, int, byte)> shotSets = new(); readonly List<int[]> shotFills = new(); double[] shotPos; float[] shotRot; long shotSeed = 1234; long shotTime = -1; bool shotFly;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws, string[] args) : base(gws, nws)
@@ -80,6 +80,7 @@ public sealed class Game : GameWindow
                 case "--debug": showDebug = true; break;
                 case "--pos": shotPos = new[] { double.Parse(args[++i]), double.Parse(args[++i]), double.Parse(args[++i]) }; break;
                 case "--rot": shotRot = new[] { float.Parse(args[++i]), float.Parse(args[++i]) }; break;
+                case "--break": shotBreaks.Add(new[] { int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]) }); break;
                 case "--cmd": shotCmds.Add(args[++i]); break;
                 case "--chat": shotChat = args[++i]; break;
                 case "--luanti": shotLuanti = true; break;
@@ -334,6 +335,7 @@ public sealed class Game : GameWindow
         if (screen != null || !inGame || spectator || !Pick(out int x, out int y, out int z, out _, out _, out _)) return;
         byte b = world.GetBlock(x, y, z);
         if (b == Blk.Bedrock && false) return;
+        world.SpawnBreak(x, y, z, b);
         world.SetBlock(x, y, z, Blk.Air);
     }
     void PlaceBlock()
@@ -379,6 +381,7 @@ public sealed class Game : GameWindow
         tickCount++;
         if (DoDaylightCycle) world.Time++;
         world.TickScheduled();
+        world.UpdateParticles();
         var inp = new PlayerInput();
         if (screen == null)
         {
@@ -635,6 +638,7 @@ public sealed class Game : GameWindow
                     for (int fz = Math.Min(f[2], f[5]); fz <= Math.Max(f[2], f[5]); fz++)
                         for (int fx = Math.Min(f[0], f[3]); fx <= Math.Max(f[0], f[3]); fx++) world.SetBlock(fx, fy, fz, (byte)f[6]);
             foreach (var (sx, sy, sz, sid) in shotSets) world.SetBlock(sx, sy, sz, sid);
+            foreach (var br in shotBreaks) { var bb = world.GetBlock(br[0], br[1], br[2]); world.SpawnBreak(br[0], br[1], br[2], bb); world.SetBlock(br[0], br[1], br[2], Blk.Air); }
             foreach (var c in shotCmds) { Say("> " + c, 0xFFAAAAAA); Commands.Run(this, c); }
             if (shotChat != null) SetScreen(new ChatScreen(shotChat, false));
             if (shotScreen != null) ApplyShotScreen();

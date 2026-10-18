@@ -4,7 +4,7 @@ using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 namespace McClone;
 
-public sealed class World
+public sealed partial class World
 {
     public readonly long Seed;
     public readonly TerrainGen Gen;
