@@ -16,6 +16,8 @@ public sealed class Settings
     public float Sensitivity = 0.5f;
     public bool Clouds = true, VSync = true, Bobbing = true;
     public float FlightSpeed = 1f;
+    public bool Shaders = true, Reflections = true, Bloom = true;
+    public int ShadowQuality = 1;     // 0 off, 1 medium (2048), 2 high (4096)
     public List<string> ResourcePacks = new();   // highest priority first
 
     static string PathFile => Path.Combine(SaveIO.RootDir, "options.txt");
@@ -39,6 +41,10 @@ public sealed class Settings
                         case "clouds": s.Clouds = v == "true"; break;
                         case "vsync": s.VSync = v == "true"; break;
                         case "bobbing": s.Bobbing = v == "true"; break;
+                        case "shaders": s.Shaders = v == "true"; break;
+                        case "reflections": s.Reflections = v == "true"; break;
+                        case "bloom": s.Bloom = v == "true"; break;
+                        case "shadowQuality": s.ShadowQuality = Math.Clamp(int.Parse(v), 0, 2); break;
                         case "flightSpeed": s.FlightSpeed = Math.Clamp(float.Parse(v, System.Globalization.CultureInfo.InvariantCulture), 0.1f, 20f); break;
                         case "resourcePacks": s.ResourcePacks = v.Split('|', StringSplitOptions.RemoveEmptyEntries).Distinct().ToList(); break;
                     }
@@ -59,6 +65,7 @@ public sealed class Settings
                 $"fov:{Fov}", $"renderDistance:{RenderDist}", $"guiScale:{GuiScale}",
                 $"sensitivity:{Sensitivity.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 $"clouds:{(Clouds ? "true" : "false")}", $"vsync:{(VSync ? "true" : "false")}", $"bobbing:{(Bobbing ? "true" : "false")}",
+                $"shaders:{(Shaders ? "true" : "false")}", $"reflections:{(Reflections ? "true" : "false")}", $"bloom:{(Bloom ? "true" : "false")}", $"shadowQuality:{ShadowQuality}",
                 $"flightSpeed:{FlightSpeed.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 $"resourcePacks:{string.Join("|", ResourcePacks)}"
             });

@@ -307,7 +307,8 @@ public sealed class OptionsScreen : Screen
         Buttons.Add(bob);
         var fs = new Btn(rx, y, 150, 20, "Toggle Fullscreen (F11)", () => G.ToggleFullscreen());
         Buttons.Add(fs);
-        Buttons.Add(new Btn(lx, y + 24, 310, 20, "Resource Packs...", () => G.OpenScreen(new ResourcePackScreen(this))));
+        Buttons.Add(new Btn(lx, y + 24, 150, 20, "Resource Packs...", () => G.OpenScreen(new ResourcePackScreen(this))));
+        Buttons.Add(new Btn(rx, y + 24, 150, 20, "Shader Settings...", () => G.OpenScreen(new ShaderSettingsScreen(this))));
         Buttons.Add(new Btn(W / 2 - 100, H / 6 + 24 * 6 + 8, 200, 20, "Done", () => { s.Save(); G.SetScreen(parent); }));
     }
     protected override void DrawContent(UiBatch ui, int mx, int my) => ui.TextCentered("Options", W / 2f, 15);
@@ -690,5 +691,43 @@ public sealed class ResourcePackScreen : Screen
         string st = LuantiPack.Status;
         if (st.Length > 0) ui.TextCentered(st, W / 2f, H - 96, LuantiPack.Running ? 0xFFFFFFA0 : LuantiPack.Success ? 0xFF80FF80 : 0xFFFF8080);
         else ui.TextCentered("Top pack overrides the ones below. Minecraft Java packs work (16x - 128x).", W / 2f, H - 96, 0xFF707070);
+    }
+}
+
+public sealed class ShaderSettingsScreen : Screen
+{
+    readonly Screen parent;
+    public override bool DirtBg => true;
+    public ShaderSettingsScreen(Screen p) { parent = p; }
+    public override void OnEscape() { G.Settings.Save(); G.SetScreen(parent); }
+    static string OnOff(bool b) => b ? "ON" : "OFF";
+    static string ShadowText(int q) => q == 0 ? "OFF" : q == 1 ? "Medium (2048)" : "High (4096)";
+    protected override void Build()
+    {
+        var s = G.Settings;
+        int lx = W / 2 - 155, rx = W / 2 + 5, y = H / 6;
+        var sh = new Btn(lx, y, 310, 20, "", null);
+        Btn shadows = null, refl = null, bloom = null;
+        void Refresh()
+        {
+            sh.Text = "Shader Pack Lighting: " + OnOff(s.Shaders);
+            shadows.Text = "Sun Shadows: " + ShadowText(s.ShadowQuality);
+            refl.Text = "Water Reflections: " + OnOff(s.Reflections);
+            bloom.Text = "Bloom & Glow: " + OnOff(s.Bloom);
+            shadows.Enabled = refl.Enabled = bloom.Enabled = s.Shaders;
+        }
+        shadows = new Btn(lx, y + 28, 310, 20, "", () => { s.ShadowQuality = (s.ShadowQuality + 1) % 3; Refresh(); });
+        refl = new Btn(lx, y + 52, 150, 20, "", () => { s.Reflections = !s.Reflections; Refresh(); });
+        bloom = new Btn(rx, y + 52, 150, 20, "", () => { s.Bloom = !s.Bloom; Refresh(); });
+        sh.OnClick = () => { s.Shaders = !s.Shaders; Refresh(); };
+        Buttons.Add(sh); Buttons.Add(shadows); Buttons.Add(refl); Buttons.Add(bloom);
+        Refresh();
+        Buttons.Add(new Btn(W / 2 - 100, H / 6 + 24 * 6 + 8, 200, 20, "Done", () => { s.Save(); G.SetScreen(parent); }));
+    }
+    protected override void DrawContent(UiBatch ui, int mx, int my)
+    {
+        ui.TextCentered("Shader Settings", W / 2f, 15);
+        ui.TextCentered("Sun shadows, sky-lit ambient, bloom glow on torches, SSR water reflections.", W / 2f, H / 6 + 90, 0xFF909090);
+        ui.TextCentered("Turn everything off for the classic vanilla look.", W / 2f, H / 6 + 101, 0xFF909090);
     }
 }

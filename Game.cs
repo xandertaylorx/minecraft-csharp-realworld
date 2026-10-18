@@ -84,6 +84,8 @@ public sealed class Game : GameWindow
                 case "--chat": shotChat = args[++i]; break;
                 case "--luanti": shotLuanti = true; break;
                 case "--pack": { var pn = args[++i]; Settings.ResourcePacks.Remove(pn); Settings.ResourcePacks.Add(pn); break; }
+                case "--noshaders": Settings.Shaders = false; break;
+                case "--shadows": Settings.ShadowQuality = int.Parse(args[++i]); break;
                 case "--rd": Settings.RenderDist = int.Parse(args[++i]); break;
                 case "--fill": shotFills.Add(new[] { int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]) }); break;
                 case "--set": shotSets.Add((int.Parse(args[++i]), int.Parse(args[++i]), int.Parse(args[++i]), byte.Parse(args[++i]))); break;
@@ -460,7 +462,7 @@ public sealed class Game : GameWindow
             pano.Update(cam.Pos.X, cam.Pos.Y, cam.Pos.Z, rd);
             Renderer.Animate((long)(Time * 20));
             var at = Atmos.Compute(1800, 0, false);
-            Renderer.RenderWorld(pano, cam, rd, at, false, 0, null, true, (long)(Time * 20));
+            Renderer.RenderWorld(pano, cam, rd, at, false, 0, null, true, (long)(Time * 20), Settings, fb.X, fb.Y, Time);
         }
         else { GL.ClearColor(0.1f, 0.1f, 0.1f, 1f); GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit); }
 
@@ -497,7 +499,7 @@ public sealed class Game : GameWindow
             var d = cam.Forward;
             if (world.Raycast(cam.Pos, new Vector3d(d.X, d.Y, d.Z), 5.0, out int hx, out int hy, out int hz, out tnx, out tny, out tnz)) target = (hx, hy, hz);
         }
-        Renderer.RenderWorld(world, cam, Settings.RenderDist, at, uw, pt, target, Settings.Clouds, world.Time);
+        Renderer.RenderWorld(world, cam, Settings.RenderDist, at, uw, pt, target, Settings.Clouds, world.Time, Settings, FramebufferSize.X, FramebufferSize.Y, Time);
         if (uw)
         {
             GL.Disable(EnableCap.DepthTest);

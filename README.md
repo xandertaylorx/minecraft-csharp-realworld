@@ -27,6 +27,21 @@ Requires the .NET 10 SDK. Tested on macOS (Apple Silicon).
 | F1 / F2 / F3 / F11 | hide HUD / screenshot / debug / fullscreen |
 | Esc | pause |
 
+## Commands
+
+Press `T` (chat) or `/` (command). Tab completes commands, items and arguments; Up/Down browse history.
+
+`/help` `/give` `/clear` `/time set|add|query` `/gamemode creative|spectator` `/tp` `/setblock` `/fill` (replace/destroy/hollow/keep/outline)
+`/seed` `/say` `/me` `/kill` `/gamerule doDaylightCycle|doFireTick` `/locate biome` `/reload` `/save-all` `/fly`
+and `/flightspeed <0.1-20|reset>` to change how fast you fly (saved in your options).
+
+## Shader-pack look
+
+An optional (default on) HDR pipeline inspired by shader packs like BSL: sun/moon shadow maps with soft edges, warm sun and blue sky
+ambient, bloom and glowing torches/fire with flickering light, god rays, filmic tone mapping, and water with animated waves, Fresnel
+reflections (sky + screen-space reflections of the shore and trees), refraction, depth absorption, foam and sun glints.
+Everything is configurable under **Options > Shader Settings** (shadow quality, reflections, bloom) or can be switched off for the vanilla look.
+
 ## Resource packs
 
 The game loads **Minecraft Java Edition resource packs** the same way Minecraft does:
