@@ -7,7 +7,7 @@ public static class Commands
     static readonly string[] Names =
     {
         "help", "give", "clear", "time", "gamemode", "tp", "teleport", "setblock", "fill", "seed", "say", "me", "kill",
-        "gamerule", "locate", "flightspeed", "fly", "reload", "save-all", "setworldspawn", "spawnpoint", "weather", "difficulty", "summon", "explode"
+        "gamerule", "locate", "where", "flightspeed", "fly", "reload", "save-all", "setworldspawn", "spawnpoint", "weather", "difficulty", "summon", "explode"
     };
     static readonly string[] GameRules = { "doDaylightCycle", "doFireTick" };
     static readonly string[] TimeWords = { "day", "noon", "night", "midnight", "sunrise", "sunset" };
@@ -64,6 +64,7 @@ public static class Commands
                 case "kill": g.Respawn(); Ok(g, "Killed Player"); break;
                 case "gamerule": GameRule(g, a); break;
                 case "locate": Locate(g, a, w); break;
+                case "where": Where(g); break;
                 case "flightspeed": FlightSpeed(g, a); break;
                 case "fly": p.Flying = !p.Flying; if (p.Flying) p.MY = 0; Ok(g, p.Flying ? "Flying enabled" : "Flying disabled"); break;
                 case "reload": g.ReloadResources(); Ok(g, "Reloaded resources"); break;
@@ -91,7 +92,8 @@ public static class Commands
                 "clear" => "/clear [<targets>] [<item>]",
                 "time" => "/time set <day|noon|night|midnight|sunrise|sunset|ticks> | add <ticks> | query <daytime|gametime|day>",
                 "gamemode" => "/gamemode <creative|spectator>",
-                "tp" or "teleport" => "/tp [<targets>] <x> <y> <z> [<yaw> <pitch>]   (~ = relative)",
+                "tp" or "teleport" => "/tp [<targets>] <x> <y> <z> [<yaw> <pitch>]   (~ = relative). Earth worlds: /tp <place name> or /tp <latitude> <longitude>",
+                "where" => "/where   (Earth worlds: your latitude and longitude)",
                 "setblock" => "/setblock <x> <y> <z> <block> [destroy|keep|replace]",
                 "fill" => "/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [replace [<filter>]|destroy|hollow|keep|outline]",
                 "gamerule" => "/gamerule <doDaylightCycle|doFireTick> [true|false]",
@@ -196,7 +198,29 @@ public static class Commands
         int i = 1;
         if (a.Length > 1 && IsTarget(a[1])) i = 2;
         var p = g.Me;
-        if (a.Length < i + 3) { Err(g, "Usage: /tp [<targets>] <x> <y> <z> [<yaw> <pitch>]"); return; }
+        if (g.IsEarth && a.Length > i)
+        {
+            bool numeric = Num(a[i], p.X, out _);
+            if (!numeric)
+            {
+                string q = string.Join(' ', a.Skip(i));
+                Ok(g, "Searching for " + q + "...");
+                Task.Run(() =>
+                {
+                    bool ok = EarthGeo.Search(q, out double la, out double lo, out string nm);
+                    g.Post(() => { if (ok) g.TeleportEarth(la, lo, nm); else Err(g, "Could not find a place called '" + q + "'"); });
+                });
+                return;
+            }
+            if (a.Length == i + 2 && !a[i].StartsWith("~") && !a[i + 1].StartsWith("~")
+                && double.TryParse(a[i], NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) && double.TryParse(a[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var lon))
+            {
+                if (lat < -85 || lat > 85 || lon < -180 || lon > 180) { Err(g, "Latitude must be -85..85 and longitude -180..180"); return; }
+                { string lbl = F(lat) + ", " + F(lon); g.Post(() => g.TeleportEarth(lat, lon, lbl)); }
+                return;
+            }
+        }
+        if (a.Length < i + 3) { Err(g, g.IsEarth ? "Usage: /tp <place name> | <latitude> <longitude> | <x> <y> <z>" : "Usage: /tp [<targets>] <x> <y> <z> [<yaw> <pitch>]"); return; }
         if (!Num(a[i], p.X, out var x) || !Num(a[i + 1], p.Y, out var y) || !Num(a[i + 2], p.Z, out var z)) { Err(g, "Expected a coordinate"); return; }
         if (a.Length >= i + 5)
         {
@@ -204,6 +228,13 @@ public static class Commands
         }
         p.SetPos(x, y, z);
         Ok(g, $"Teleported Player to {F(x)}, {F(y)}, {F(z)}");
+    }
+
+    static void Where(Game g)
+    {
+        if (!g.IsEarth) { Err(g, "/where only works in Earth worlds"); return; }
+        var (la, lo) = g.LatLonOf(g.Me.X, g.Me.Z);
+        Ok(g, $"You are at latitude {F(la)}, longitude {F(lo)}");
     }
 
     static void SetBlock(Game g, string[] a, World w)

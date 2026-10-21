@@ -20,6 +20,21 @@ static class Program
             }
             return;
         }
+        int ti = Array.IndexOf(args, "--earthtp");
+        if (ti >= 0)   // debug: --earthtp lat,lon,scale targetLat,targetLon  (teleport round trip)
+        {
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            var ep = args[ti + 1].Split(','); var tp = args[ti + 2].Split(',');
+            var cfg = new EarthConfig { Lat = double.Parse(ep[0], ci), Lon = double.Parse(ep[1], ci), Scale = int.Parse(ep[2]) };
+            var e0 = new EarthData(cfg);
+            e0.LatLonToBlock(double.Parse(tp[0], ci), double.Parse(tp[1], ci), out double bx, out double bz);
+            cfg.FrameX = (int)(Math.Round(bx / 16) * 16); cfg.FrameZ = (int)(Math.Round(bz / 16) * 16);
+            e0.BlockToLatLon(cfg.FrameX, cfg.FrameZ, out double la, out double lo);
+            Console.WriteLine($"target block {bx:0},{bz:0} frame {cfg.FrameX},{cfg.FrameZ} -> {la:0.0000},{lo:0.0000}");
+            var g = new TerrainGen(1, cfg);
+            Console.WriteLine($"datum {g.Earth.Datum} column(0,0): H={g.Column(0, 0).H} biome={g.Column(0, 0).Biome} lc={g.Column(0, 0).Lc} elev={g.Column(0, 0).Elev:0.0}");
+            return;
+        }
         var gws = GameWindowSettings.Default;
         var nws = new NativeWindowSettings
         {

@@ -6,7 +6,8 @@ public static class T
         Water = 9, LogSide = 10, LogTop = 11, Leaves = 12, SandstoneSide = 13, SandstoneTop = 14, Snow = 15, SnowSide = 16,
         Coal = 17, Iron = 18, Gold = 19, Diamond = 20, Glass = 21, Bricks = 22, TallGrass = 23, Dandelion = 24, Poppy = 25,
         CactusSide = 26, CactusTop = 27, FlintSteel = 28, Torch = 29, Fire = 30,
-        TntSide = 31, TntTop = 32, TntBottom = 33, Bow = 34, Arrow = 35, ExplosiveArrow = 36, ArrowEntity = 37, ExplosiveArrowEntity = 38, Max = 38;
+        TntSide = 31, TntTop = 32, TntBottom = 33, Bow = 34, Arrow = 35, ExplosiveArrow = 36, ArrowEntity = 37, ExplosiveArrowEntity = 38,
+        Asphalt = 39, Concrete = 40, RedSand = 41, RedSandstoneSide = 42, RedSandstoneTop = 43, Terracotta = 44, TerracottaRed = 45, TerracottaTan = 46, Max = 46;
 }
 
 public static class Blk
@@ -19,6 +20,8 @@ public static class Blk
         Fire = 34,
         // torches are named after the direction of the block they are attached to
         TorchFloor = 35, TorchPX = 36, TorchNX = 37, TorchPZ = 38, TorchNZ = 39,
+        // Earth mode materials
+        Asphalt = 40, Concrete = 41, RedSand = 42, RedSandstone = 43, Terracotta = 44, TerracottaRed = 45, TerracottaTan = 46,
         // items (not placeable blocks)
         FlintSteel = 128, Bow = 129, Arrow = 130, ExplosiveArrow = 131;
 
@@ -95,11 +98,18 @@ public static class Blk
         Def(Bow, "Bow", T.Bow, T.Bow, T.Bow, false, false, 0); Sprite[Bow] = true;
         Def(Arrow, "Arrow", T.Arrow, T.Arrow, T.Arrow, false, false, 0); Sprite[Arrow] = true;
         Def(ExplosiveArrow, "Explosive Arrow", T.ExplosiveArrow, T.ExplosiveArrow, T.ExplosiveArrow, false, false, 0); Sprite[ExplosiveArrow] = true;
+        Def(Asphalt, "Asphalt", T.Asphalt, T.Asphalt, T.Asphalt);
+        Def(Concrete, "Concrete", T.Concrete, T.Concrete, T.Concrete);
+        Def(RedSand, "Red Sand", T.RedSand, T.RedSand, T.RedSand);
+        Def(RedSandstone, "Red Sandstone", T.RedSandstoneTop, T.RedSandstoneTop, T.RedSandstoneSide);
+        Def(Terracotta, "Terracotta", T.Terracotta, T.Terracotta, T.Terracotta);
+        Def(TerracottaRed, "Red Terracotta", T.TerracottaRed, T.TerracottaRed, T.TerracottaRed);
+        Def(TerracottaTan, "Tan Terracotta", T.TerracottaTan, T.TerracottaTan, T.TerracottaTan);
         byName = null;
         // explosion resistance (vanilla values)
         void R(float v, params byte[] ids) { foreach (var i in ids) Resist[i] = v; }
         R(6, Stone, Cobble, Bricks); R(3, Planks, CoalOre, IronOre, GoldOre, DiamondOre); R(3600000, Bedrock);
-        R(0.5f, Dirt, Sand); R(0.6f, Grass, SnowGrass, Gravel); R(2, Log); R(0.2f, Leaves, Snow); R(0.8f, Sandstone);
+        R(0.5f, Dirt, Sand, RedSand); R(6, Asphalt, Concrete); R(4.2f, Terracotta, TerracottaRed, TerracottaTan); R(0.8f, RedSandstone); R(0.6f, Grass, SnowGrass, Gravel); R(2, Log); R(0.2f, Leaves, Snow); R(0.8f, Sandstone);
         R(0.3f, Glass); R(0.4f, Cactus); R(0, Tnt, TallGrass, Dandelion, Poppy, Fire, TorchFloor, TorchPX, TorchNX, TorchPZ, TorchNZ);
         for (int i = 0; i < 256; i++) if (WaterT[i]) Resist[i] = 100f;
         Cross[TallGrass] = Cross[Dandelion] = Cross[Poppy] = true;

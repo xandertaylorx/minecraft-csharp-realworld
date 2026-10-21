@@ -33,7 +33,24 @@ public sealed partial class World
         return l.ToArray();
     }
 
-    public World(long seed, EarthConfig earth = null) { Seed = seed; Gen = new TerrainGen(seed, earth); }
+    readonly System.Collections.Concurrent.ConcurrentQueue<(int x0, int z0, int x1, int z1)> regenQ = new();
+    public World(long seed, EarthConfig earth = null)
+    {
+        Seed = seed; Gen = new TerrainGen(seed, earth);
+        if (Gen.Osm != null) Gen.Osm.TileLoaded += (x0, z0, x1, z1) => regenQ.Enqueue((x0, z0, x1, z1));
+    }
+
+    /// <summary>Map data arrived for a block range: drop the loaded chunks in it so they regenerate with roads, rivers and buildings.</summary>
+    void DrainRegen()
+    {
+        while (regenQ.TryDequeue(out var r))
+        {
+            int cx0 = FloorDiv16(r.x0 - Gen.FrameX), cx1 = FloorDiv16(r.x1 - Gen.FrameX), cz0 = FloorDiv16(r.z0 - Gen.FrameZ), cz1 = FloorDiv16(r.z1 - Gen.FrameZ);
+            for (int cz = cz0; cz <= cz1; cz++)
+                for (int cx = cx0; cx <= cx1; cx++)
+                    if (Chunks.TryGetValue(Key(cx, cz), out var c)) Unload(c);
+        }
+    }
 
     // ------------------------------------------------------------------ block access (main thread)
     Chunk cacheC; int cacheCX = int.MinValue, cacheCZ;
@@ -551,6 +568,7 @@ public sealed partial class World
     public void Update(double px, double py, double pz, int rd)
     {
         if (Disposed) return;
+        DrainRegen();
         int pcx = FloorDiv16(px), pcz = FloorDiv16(pz);
         int genR = rd + 1;
         int maxFlight = Math.Max(2, Environment.ProcessorCount - 2);

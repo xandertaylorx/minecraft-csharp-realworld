@@ -62,6 +62,12 @@ public static class AtlasBuilder
         new(T.TntBottom, 0, "block/tnt_bottom", "blocks/tnt_bottom"),
         new(T.Bow, 0, "item/bow", "items/bow_standby"),
         new(T.Arrow, 0, "item/arrow", "items/arrow"),
+        new(T.RedSand, 0, "block/red_sand", "blocks/red_sand"),
+        new(T.RedSandstoneSide, 0, "block/red_sandstone", "blocks/red_sandstone_normal"),
+        new(T.RedSandstoneTop, 0, "block/red_sandstone_top", "blocks/red_sandstone_top"),
+        new(T.Terracotta, 0, "block/terracotta", "blocks/hardened_clay"),
+        new(T.TerracottaRed, 0, "block/red_terracotta", "blocks/hardened_clay_stained_red"),
+        new(T.TerracottaTan, 0, "block/white_terracotta", "blocks/hardened_clay_stained_white"),
     };
     static readonly string[] GrassOverlay = { "block/grass_block_side_overlay", "blocks/grass_side_overlay" };
     const string Root = "assets/minecraft/textures/";

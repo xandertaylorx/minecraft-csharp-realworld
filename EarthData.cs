@@ -6,6 +6,7 @@ public sealed class EarthConfig
 {
     public double Lat, Lon;
     public int Scale = 1;   // metres per block (horizontal)
+    public int FrameX, FrameZ;   // /tp re-centres the world: local block (0,0) = master block (FrameX, FrameZ), both multiples of 16
 
     public static readonly int[] Scales = { 1, 2, 4, 8, 16, 32 };
     public static readonly (string name, double lat, double lon)[] Presets =
@@ -34,6 +35,8 @@ public sealed class EarthConfig
 public sealed class EarthData
 {
     public readonly double Lat0, Lon0, Mpb;
+    public readonly int FrameX, FrameZ;
+    const double R = 6378137.0;
     readonly int zoom;
     readonly double px0, py0, pxPerBlock;
     readonly double cosLat0;
@@ -60,14 +63,101 @@ public sealed class EarthData
         py0 = (1 - Math.Asinh(Math.Tan(Lat0 * Math.PI / 180)) / Math.PI) / 2 * span;
         double mppEq = 156543.03392 / n;       // metres per pixel at the equator (Web Mercator)
         pxPerBlock = Mpb / (cosLat0 * mppEq);  // pixels covered by one block at the origin latitude
-        var around = new List<float>();   // median ground level within ~400 blocks decides the vertical datum
-        for (int gz = -4; gz <= 4; gz++) for (int gx = -4; gx <= 4; gx++) around.Add(Elevation(gx * 100, gz * 100));
+        FrameX = cfg.FrameX; FrameZ = cfg.FrameZ;
+        var around = new List<float>();   // median ground level within ~400 blocks of the frame centre decides the vertical datum
+        for (int gz = -4; gz <= 4; gz++) for (int gx = -4; gx <= 4; gx++) around.Add(Elevation(FrameX + gx * 100, FrameZ + gz * 100));
         around.Sort();
         float e0 = around[around.Count / 2];
-        Datum = e0 > 100f ? e0 - 30f * (float)Mpb : 0f;
+        // quantised in steps of 100 blocks so nearby frames agree on the datum (keeps edits aligned vertically)
+        Datum = Math.Max(0, (float)Math.Floor((e0 - 20 * Mpb) / (100 * Mpb))) * 100f * (float)Mpb;
     }
 
     public double LatAt(double z) => Math.Clamp(Lat0 - z * Mpb / 111320.0, -85, 85);
+
+    /// <summary>Master block coordinates (x east, z south) to latitude/longitude. Same Mercator mapping as the elevation lookup.</summary>
+    public void BlockToLatLon(double x, double z, out double lat, out double lon)
+    {
+        double xm = x * Mpb / cosLat0, ym = -z * Mpb / cosLat0;
+        lon = Lon0 + xm / R * 180 / Math.PI;
+        double y0 = Math.Asinh(Math.Tan(Lat0 * Math.PI / 180));
+        lat = Math.Atan(Math.Sinh(ym / R + y0)) * 180 / Math.PI;
+        lon = ((lon + 540) % 360) - 180;
+    }
+    public void LatLonToBlock(double lat, double lon, out double x, out double z)
+    {
+        lat = Math.Clamp(lat, -85, 85);
+        double dl = lon - Lon0; dl = ((dl + 540) % 360) - 180;
+        double xm = dl * Math.PI / 180 * R;
+        double ym = (Math.Asinh(Math.Tan(lat * Math.PI / 180)) - Math.Asinh(Math.Tan(Lat0 * Math.PI / 180))) * R;
+        x = xm * cosLat0 / Mpb; z = -ym * cosLat0 / Mpb;
+    }
+
+    // ---------------------------------------------------------------- land cover (NASA GIBS, MODIS IGBP classes)
+    public const int LcWater = 16;
+    static readonly Dictionary<int, byte> LcColors = BuildLcColors();
+    static Dictionary<int, byte> BuildLcColors()
+    {
+        int[][] c = {
+            new[]{33,138,33}, new[]{49,204,49}, new[]{152,204,49}, new[]{150,250,150}, new[]{141,186,141}, new[]{186,141,141},
+            new[]{245,222,179}, new[]{218,235,157}, new[]{255,213,0}, new[]{240,185,103}, new[]{71,131,181}, new[]{250,239,115},
+            new[]{255,0,0}, new[]{153,147,86}, new[]{255,255,255}, new[]{191,191,189}, new[]{134,202,227} };
+        var d = new Dictionary<int, byte>();
+        for (int i = 0; i < c.Length; i++) d[(c[i][0] << 16) | (c[i][1] << 8) | c[i][2]] = (byte)i;
+        return d;
+    }
+    readonly ConcurrentDictionary<long, Lazy<byte[]>> lcTiles = new();
+
+    byte[] LoadLcTile(int tx, int ty)
+    {
+        int z = Math.Min(8, zoom);
+        string file = Path.Combine(CacheDir, "lc", z.ToString(), tx.ToString(), ty + ".png");
+        byte[] data = null;
+        try { if (File.Exists(file)) data = File.ReadAllBytes(file); } catch { }
+        if (data == null)
+        {
+            string url = $"https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Combined_L3_IGBP_Land_Cover_Type_Annual/default/2019-01-01/GoogleMapsCompatible_Level8/{z}/{ty}/{tx}.png";
+            for (int attempt = 0; attempt < 3 && data == null; attempt++)
+            {
+                try { data = http.GetByteArrayAsync(url).GetAwaiter().GetResult(); }
+                catch (Exception e) { Console.Error.WriteLine($"Land cover tile {z}/{tx}/{ty} failed ({e.Message})"); Thread.Sleep(300 * (attempt + 1)); }
+            }
+            if (data != null)
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(file));
+                    string tmp = file + "." + Environment.CurrentManagedThreadId + ".tmp";
+                    File.WriteAllBytes(tmp, data); File.Move(tmp, file, true);
+                }
+                catch { }
+        }
+        var cls = new byte[256 * 256];
+        Array.Fill(cls, (byte)255);
+        if (data == null) return cls;
+        try
+        {
+            var img = ImageResult.FromMemory(data, ColorComponents.RedGreenBlueAlpha);
+            for (int i = 0; i < 256 * 256; i++)
+                if (img.Data[i * 4 + 3] > 0 && LcColors.TryGetValue((img.Data[i * 4] << 16) | (img.Data[i * 4 + 1] << 8) | img.Data[i * 4 + 2], out var k)) cls[i] = k;
+        }
+        catch (Exception e) { Console.Error.WriteLine("Land cover decode failed: " + e.Message); }
+        return cls;
+    }
+
+    /// <summary>MODIS IGBP land-cover class index (0 evergreen needleleaf ... 12 urban, 14 snow/ice, 15 barren, 16 water) or -1 when unknown.</summary>
+    public int LandClass(double x, double z)
+    {
+        int lz = Math.Min(8, zoom);
+        double f = Math.Pow(2, lz - zoom);
+        long ix = (long)Math.Floor((px0 + x * pxPerBlock) * f), iy = (long)Math.Floor((py0 + z * pxPerBlock) * f);
+        long lspan = (1L << lz) * 256;
+        if (iy < 0 || iy >= lspan) return -1;
+        ix = ((ix % lspan) + lspan) % lspan;
+        int tx = (int)(ix >> 8), ty = (int)(iy >> 8);
+        long key = ((long)tx << 24) | (uint)ty;
+        var t = lcTiles.GetOrAdd(key, _ => new Lazy<byte[]>(() => LoadLcTile(tx, ty))).Value;
+        byte k = t[(int)(iy & 255) * 256 + (int)(ix & 255)];
+        return k == 255 ? -1 : k;
+    }
 
     static string CacheDir => Path.Combine(SaveIO.RootDir, "earthcache");
 

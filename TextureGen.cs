@@ -192,6 +192,17 @@ public static class TextureGen
             for (int x = 0; x < 16; x++) { P(T.SandstoneSide, x, 3, 196, 183, 138); P(T.SandstoneSide, x, 12, 203, 190, 144); P(T.SandstoneSide, x, 0, 224, 212, 166); }
             Noisy(T.SandstoneTop, 222, 209, 164, 4, 2, 16);
         }
+        // Earth mode materials
+        Noisy(T.Asphalt, 54, 55, 59, 5, 2, 41);
+        { var rng = new Random(42); for (int i = 0; i < 7; i++) P(T.Asphalt, rng.Next(16), rng.Next(16), 92, 92, 96); }
+        Noisy(T.Concrete, 163, 163, 160, 4, 2, 43);
+        Noisy(T.RedSand, 190, 104, 50, 6, 4, 44);
+        Noisy(T.RedSandstoneSide, 176, 92, 42, 5, 3, 45);
+        for (int x = 0; x < 16; x++) { P(T.RedSandstoneSide, x, 3, 158, 78, 34); P(T.RedSandstoneSide, x, 12, 166, 84, 38); P(T.RedSandstoneSide, x, 0, 190, 104, 52); }
+        Noisy(T.RedSandstoneTop, 182, 98, 46, 4, 2, 46);
+        Noisy(T.Terracotta, 152, 94, 67, 3, 2, 47);
+        Noisy(T.TerracottaRed, 143, 61, 46, 3, 2, 48);
+        Noisy(T.TerracottaTan, 209, 178, 161, 3, 2, 49);
         // snow
         {
             Noisy(T.Snow, 249, 252, 252, 3, 2, 17);

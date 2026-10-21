@@ -4,6 +4,7 @@ public sealed class WorldInfo
 {
     public string Name; public long Seed; public string Dir; public DateTime LastPlayed;
     public EarthConfig Earth;   // null = normal generated world
+    public bool FreshPos;       // ignore the saved player position (set after an Earth-mode teleport)
 }
 
 public sealed class SaveState
@@ -116,8 +117,10 @@ public static class SaveIO
         if (lines.Length < 3) return null;
         var p = lines[2].Split(' ');
         var ci = System.Globalization.CultureInfo.InvariantCulture;
-        if (p.Length != 4 || p[0] != "earth") return null;
-        return new EarthConfig { Lat = double.Parse(p[1], ci), Lon = double.Parse(p[2], ci), Scale = int.Parse(p[3]) };
+        if (p.Length < 4 || p[0] != "earth") return null;
+        var e = new EarthConfig { Lat = double.Parse(p[1], ci), Lon = double.Parse(p[2], ci), Scale = int.Parse(p[3]) };
+        if (p.Length >= 6) { e.FrameX = int.Parse(p[4]); e.FrameZ = int.Parse(p[5]); }
+        return e;
     }
 
     public static WorldInfo CreateNew(string name, long seed, EarthConfig earth = null)
@@ -128,11 +131,22 @@ public static class SaveIO
         while (Directory.Exists(dir)) dir = Path.Combine(Saves, safe + " (" + (i++) + ")");
         Directory.CreateDirectory(dir);
         var ci = System.Globalization.CultureInfo.InvariantCulture;
-        var lines = new List<string> { name, seed.ToString() };
-        if (earth != null) lines.Add(string.Format(ci, "earth {0} {1} {2}", earth.Lat, earth.Lon, earth.Scale));
-        File.WriteAllLines(Path.Combine(dir, "info.txt"), lines);
-        return new WorldInfo { Name = name, Seed = seed, Earth = earth, Dir = dir, LastPlayed = DateTime.Now };
+        var wi = new WorldInfo { Name = name, Seed = seed, Earth = earth, Dir = dir, LastPlayed = DateTime.Now };
+        WriteInfo(wi);
+        return wi;
     }
+
+    public static void WriteInfo(WorldInfo w)
+    {
+        if (w?.Dir == null) return;
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        var lines = new List<string> { w.Name, w.Seed.ToString() };
+        if (w.Earth != null) lines.Add(string.Format(ci, "earth {0} {1} {2} {3} {4}", w.Earth.Lat, w.Earth.Lon, w.Earth.Scale, w.Earth.FrameX, w.Earth.FrameZ));
+        File.WriteAllLines(Path.Combine(w.Dir, "info.txt"), lines);
+    }
+
+    // edits are stored in master (world creation) chunk coordinates so Earth-mode teleports can re-centre the local frame
+    static long ShiftKey(long key, int dcx, int dcz) => World.Key((int)(key >> 32) + dcx, (int)(key & 0xFFFFFFFF) + dcz);
 
     public static void Delete(WorldInfo w) { try { if (w.Dir != null) Directory.Delete(w.Dir, true); } catch { } }
 
@@ -151,9 +165,10 @@ public static class SaveIO
             lock (w.Edits)
             {
                 bw.Write(w.Edits.Count);
+                int fcx = (info.Earth?.FrameX ?? 0) / 16, fcz = (info.Earth?.FrameZ ?? 0) / 16;
                 foreach (var kv in w.Edits)
                 {
-                    bw.Write(kv.Key); bw.Write(kv.Value.Count);
+                    bw.Write(ShiftKey(kv.Key, fcx, fcz)); bw.Write(kv.Value.Count);
                     foreach (var e in kv.Value) { bw.Write(e.Key); bw.Write(e.Value); }
                 }
             }
@@ -180,7 +195,7 @@ public static class SaveIO
             lock (w.Edits)
                 for (int i = 0; i < n; i++)
                 {
-                    long k = br.ReadInt64(); int c = br.ReadInt32();
+                    long k = ShiftKey(br.ReadInt64(), -(info.Earth?.FrameX ?? 0) / 16, -(info.Earth?.FrameZ ?? 0) / 16); int c = br.ReadInt32();
                     var d = new Dictionary<int, byte>();
                     for (int j = 0; j < c; j++) { int idx = br.ReadInt32(); d[idx] = br.ReadByte(); }
                     w.Edits[k] = d;

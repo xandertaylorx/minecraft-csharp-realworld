@@ -43,6 +43,9 @@ public sealed class Game : GameWindow
     bool inGame;
     Screen screen;
     LoadingScreen loading;
+    Task<(int x, int z, int y)> spawnTask;
+    readonly System.Collections.Concurrent.ConcurrentQueue<Action> mainQueue = new();
+    string geoName = "", geoCoords = ""; (double lat, double lon)? geoLast; bool geoBusy; double geoTime;
     readonly Stopwatch sw = Stopwatch.StartNew();
     double lastT, acc, fpsAcc; int fpsFrames; float fps;
     float guiScale = 1, dpi = 1; int guiW = 320, guiH = 240, lastGuiW, lastGuiH;
@@ -157,20 +160,39 @@ public sealed class Game : GameWindow
         world = new World(wi.Seed, wi.Earth);
         var st = SaveIO.Load(wi, world);
         P = new Player();
+        spawnTask = null; geoName = ""; geoCoords = ""; geoLast = null; geoBusy = false;
         if (st.Valid)
         {
-            P.SetPos(st.X, st.Y, st.Z); P.Yaw = st.Yaw; P.Pitch = st.Pitch; P.Flying = st.Flying;
+            P.Flying = st.Flying;
             for (int i = 0; i < 9; i++) Hotbar[i] = st.Hotbar[i];
             Selected = Math.Clamp(st.Sel, 0, 8);
         }
+        if (st.Valid && !wi.FreshPos) { P.SetPos(st.X, st.Y, st.Z); P.Yaw = st.Yaw; P.Pitch = st.Pitch; }
         else
         {
-            var (sx, sz) = FindSpawn(world.Gen);
-            int h = Math.Max(world.Gen.Column(sx, sz).H, world.Gen.Column(sx, sz).WaterY);
-            P.SetPos(sx + 0.5, h + 1.01, sz + 0.5);
-            P.Yaw = 0; P.Pitch = 10;
-            world.Time = 1000;
+            if (world.Gen.Earth != null)
+            {
+                // the map data may need downloading: look for the spawn on a worker thread while the loading screen shows
+                P.SetPos(0.5, 200, 0.5); P.Yaw = 0; P.Pitch = 10;
+                var gen = world.Gen;
+                spawnTask = Task.Run(() =>
+                {
+                    gen.Osm?.EnsureLoaded(0 + gen.FrameX, 0 + gen.FrameZ, 20000);
+                    var (sx, sz) = FindSpawn(gen);
+                    var c = gen.Column(sx, sz);
+                    return (sx, sz, Math.Max(c.H, c.WaterY));
+                });
+            }
+            else
+            {
+                var (sx, sz) = FindSpawn(world.Gen);
+                int h = Math.Max(world.Gen.Column(sx, sz).H, world.Gen.Column(sx, sz).WaterY);
+                P.SetPos(sx + 0.5, h + 1.01, sz + 0.5);
+                P.Yaw = 0; P.Pitch = 10;
+            }
+            if (!st.Valid) world.Time = 1000;
         }
+        wi.FreshPos = false;
         P.FlySpeed = Settings.FlightSpeed;
         world.Me = P;
         spectator = false;
@@ -189,10 +211,60 @@ public sealed class Game : GameWindow
                 double ang = a * Math.PI * 2 / Math.Max(1, r / 4);
                 int x = (int)(Math.Cos(ang) * r), z = (int)(Math.Sin(ang) * r);
                 var c = g.Column(x, z);
-                if (earth ? c.Biome != Biome.Ocean && c.H >= c.WaterY : c.H >= TerrainGen.SeaLevel + 1 && c.Biome != Biome.Ocean && c.Biome != Biome.Beach && c.Biome != Biome.Mountains) return (x, z);
+                if (earth ? c.Biome != Biome.Ocean && c.H >= c.WaterY && (c.Feat == Col.FNone || c.Feat == Col.FRoad || c.Feat == Col.FPath) : c.H >= TerrainGen.SeaLevel + 1 && c.Biome != Biome.Ocean && c.Biome != Biome.Beach && c.Biome != Biome.Mountains) return (x, z);
             }
         return (0, 0);
     }
+
+    // ------------------------------------------------------------------ Earth mode: location label and teleport
+    public bool IsEarth => inGame && world?.Gen.Earth != null;
+
+    /// <summary>Latitude/longitude of a local block position.</summary>
+    public (double lat, double lon) LatLonOf(double x, double z)
+    {
+        var g = world.Gen;
+        g.Earth.BlockToLatLon(x + g.FrameX, z + g.FrameZ, out double la, out double lo);
+        return (la, lo);
+    }
+
+    void UpdateGeo()
+    {
+        if (!IsEarth || P == null) return;
+        var (la, lo) = LatLonOf(P.X, P.Z);
+        geoCoords = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0.0000} {1}  {2:0.0000} {3}", Math.Abs(la), la >= 0 ? "N" : "S", Math.Abs(lo), lo >= 0 ? "E" : "W");
+        bool moved = !geoLast.HasValue || Math.Abs(la - geoLast.Value.lat) > 0.03 || Math.Abs(lo - geoLast.Value.lon) > 0.03 / Math.Max(0.2, Math.Cos(la * Math.PI / 180));
+        if (geoBusy || !moved || Time - geoTime < 2) return;
+        geoBusy = true; geoTime = Time; geoLast = (la, lo);
+        var w = world;
+        Task.Run(() =>
+        {
+            string n = EarthGeo.Reverse(la, lo);
+            mainQueue.Enqueue(() => { if (world == w) { if (n != null) geoName = n; else geoLast = null; } geoBusy = false; });
+        });
+    }
+
+    void DrawEarthLabel()
+    {
+        float y = showDebug ? 46 : 3;
+        if (geoName.Length > 0) { int w = Ui.TextWidth(geoName); Ui.Rect(Ui.W - w - 5, y - 1, w + 4, 10, 0x80000000); Ui.Text(geoName, Ui.W - w - 3, y, 0xFFFFFFFF); y += 11; }
+        if (geoCoords.Length > 0) { int w = Ui.TextWidth(geoCoords); Ui.Rect(Ui.W - w - 5, y - 1, w + 4, 10, 0x60000000); Ui.Text(geoCoords, Ui.W - w - 3, y, 0xFFB0B0B0); }
+    }
+
+    /// <summary>Re-centres the Earth world on a place: saves, shifts the frame (so coordinates stay small) and reloads there.</summary>
+    public void TeleportEarth(double lat, double lon, string label)
+    {
+        var e = world?.Gen.Earth;
+        if (e == null || info?.Earth == null) return;
+        e.LatLonToBlock(lat, lon, out double bx, out double bz);
+        SaveGame();
+        info.Earth.FrameX = (int)(Math.Round(bx / 16) * 16); info.Earth.FrameZ = (int)(Math.Round(bz / 16) * 16);
+        info.FreshPos = true;
+        SaveIO.WriteInfo(info);
+        SpawnPoint = null;
+        StartGame(info);
+        Say("Teleported to " + label, 0xFFFFFFFF);
+    }
+    public void Post(Action a) => mainQueue.Enqueue(a);
 
     public void QuitToTitle()
     {
@@ -414,6 +486,7 @@ public sealed class Game : GameWindow
     void Tick()
     {
         tickCount++;
+        UpdateGeo();
         if (DoDaylightCycle) world.Time++;
         world.TickScheduled();
         world.UpdateParticles();
@@ -485,12 +558,20 @@ public sealed class Game : GameWindow
             if (!(screen != null && screen.Pauses)) { acc += dt; while (acc >= 0.05) { acc -= 0.05; Tick(); } }
             float pt = (float)(acc / 0.05);
             double ex = P.PX + (P.X - P.PX) * pt, ey = P.PY + (P.Y - P.PY) * pt, ez = P.PZ + (P.Z - P.PZ) * pt;
+            while (mainQueue.TryDequeue(out var job)) job();
+            if (spawnTask != null && spawnTask.IsCompleted)
+            {
+                var (sx, sz, sy) = spawnTask.IsCompletedSuccessfully ? spawnTask.Result : (0, 0, 120);
+                P.SetPos(sx + 0.5, sy + 1.01, sz + 0.5); spawnTask = null;
+                ex = P.X; ey = P.Y; ez = P.Z;
+            }
             world.Update(ex, ey, ez, Settings.RenderDist);
             if (screen == loading && loading != null)
             {
                 int pcx = World.FloorDiv16(P.X), pcz = World.FloorDiv16(P.Z);
-                loading.Progress = world.AreaProgress(pcx, pcz, 3);
-                if (world.AreaReady(pcx, pcz, 3)) { loading = null; CloseScreen(); }
+                loading.Msg = spawnTask != null ? "Downloading map data" : "Loading terrain";
+                loading.Progress = spawnTask != null ? 0 : world.AreaProgress(pcx, pcz, 3);
+                if (spawnTask == null && world.AreaReady(pcx, pcz, 3)) { loading = null; CloseScreen(); }
             }
             RenderGame(pt);
         }
@@ -558,6 +639,7 @@ public sealed class Game : GameWindow
     void DrawHud()
     {
         float W = Ui.W, H = Ui.H;
+        if (IsEarth) DrawEarthLabel();
         // crosshair
         if (screen == null)
         {
