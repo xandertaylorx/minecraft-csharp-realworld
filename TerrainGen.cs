@@ -6,17 +6,20 @@ public enum Biome : byte { Ocean, Beach, Plains, Forest, Desert, Snowy, Mountain
 public struct Col
 {
     public int H; public Biome Biome; public float T, Hu;
+    public int WaterY; public float Elev;   // water surface height; real elevation in metres (Earth mode)
 }
 
 public sealed class TerrainGen
 {
     public const int SeaLevel = 62;
     public readonly long Seed;
+    public readonly EarthData Earth;
     readonly Perlin cont, detail, ridge, tempN, humN, cave1, cave2, cave3, cave4, ore1, ore2, beachN, patch;
 
-    public TerrainGen(long seed)
+    public TerrainGen(long seed, EarthConfig earth = null)
     {
         Seed = seed;
+        if (earth != null) Earth = new EarthData(earth);
         cont = new Perlin(seed + 1); detail = new Perlin(seed + 2); ridge = new Perlin(seed + 3);
         tempN = new Perlin(seed + 4); humN = new Perlin(seed + 5);
         cave1 = new Perlin(seed + 6); cave2 = new Perlin(seed + 7); cave3 = new Perlin(seed + 8); cave4 = new Perlin(seed + 9);
@@ -40,8 +43,59 @@ public sealed class TerrainGen
         return Spline[^1].h;
     }
 
+    // Earth mode: temperature from latitude + altitude, humidity from latitude bands plus local patches
+    (float t, float hu) EarthClimate(int x, int z, float elevM)
+    {
+        double lat = Math.Abs(Earth.LatAt(z));
+        double tc = 27 - 0.0075 * lat * lat - 6.5 * Math.Max(0, elevM) / 1000.0;
+        float t = Math.Clamp((float)((tc + 12) / 48), 0f, 1f);
+        double hu0 = 0.35 + 0.4 * Math.Exp(-Math.Pow(lat / 10, 2)) - 0.22 * Math.Exp(-Math.Pow((lat - 27) / 9, 2)) + 0.15 * Math.Exp(-Math.Pow((lat - 50) / 12, 2));
+        float mx = (float)(x * Earth.Mpb), mz = (float)(z * Earth.Mpb);
+        float hu = (float)hu0 + 0.35f * humN.Fbm2(mx * 0.00002f, mz * 0.00002f, 3) + 0.30f * patch.Fbm2(mx * 0.0009f, mz * 0.0009f, 3);
+        return (t, Math.Clamp(hu, 0f, 1f));
+    }
+
+    Col EarthColumn(int x, int z)
+    {
+        float elev = Earth.Elevation(x, z);
+        bool lake = false; float lakeY = 0;
+        if (elev >= 1f && Earth.FlatWater(x, z, out float surf)) { lake = true; lakeY = surf; }
+        bool sea = Earth.Datum == 0;   // high-altitude worlds have no sea nearby
+        int water = sea ? SeaLevel : 0;
+        int hh;
+        if (lake)
+        {
+            water = Math.Clamp(SeaLevel + (int)MathF.Round(Earth.ToBlocks(lakeY)), 12, Chunk.Height - 14);
+            hh = water - 3;
+        }
+        else
+        {
+            float h = SeaLevel + Earth.ToBlocks(elev);
+            if (elev > 2f) h += detail.Fbm2(x * 0.05f, z * 0.05f, 2) * 1.6f / MathF.Sqrt((float)Earth.Mpb);
+            hh = Math.Clamp((int)MathF.Round(h), 3, Chunk.Height - 14);
+            if (sea && elev <= 0.05f) hh = Math.Min(hh, SeaLevel - 1);
+        }
+        var (t, hu) = EarthClimate(x, z, elev);
+        Biome b;
+        if (hh < water) b = Biome.Ocean;
+        else if (sea && elev < 4f && hh <= SeaLevel + 2 && NearSea(x, z)) b = Biome.Beach;
+        else if (elev > 1500f) b = Biome.Mountains;
+        else if (t < 0.27f) b = Biome.Snowy;
+        else if (t > 0.72f && hu < 0.45f) b = Biome.Desert;
+        else if (hu > 0.5f) b = Biome.Forest;
+        else b = Biome.Plains;
+        return new Col { H = hh, Biome = b, T = t, Hu = hu, WaterY = water, Elev = elev };
+    }
+
+    bool NearSea(int x, int z)
+    {
+        int d = (int)Math.Clamp(6 / Earth.Mpb, 2, 6);
+        return Earth.Elevation(x + d, z) <= 0.05f || Earth.Elevation(x - d, z) <= 0.05f || Earth.Elevation(x, z + d) <= 0.05f || Earth.Elevation(x, z - d) <= 0.05f;
+    }
+
     public (float t, float hu) Climate(int x, int z)
     {
+        if (Earth != null) return EarthClimate(x, z, Earth.Elevation(x, z));
         float t = Math.Clamp(0.5f + 1.25f * tempN.Fbm2(x * 0.0016f, z * 0.0016f, 3), 0f, 1f);
         float h = Math.Clamp(0.5f + 1.25f * humN.Fbm2(x * 0.0016f + 50f, z * 0.0016f - 30f, 3), 0f, 1f);
         return (t, h);
@@ -49,6 +103,7 @@ public sealed class TerrainGen
 
     public Col Column(int x, int z)
     {
+        if (Earth != null) return EarthColumn(x, z);
         float c = Math.Clamp(cont.Fbm2(x * 0.0028f, z * 0.0028f, 5) * 2.4f, -1f, 1f);
         float baseH = Eval(c);
         float rough = H.Smooth(-0.1f, 0.6f, c);
@@ -67,7 +122,7 @@ public sealed class TerrainGen
         else if (t > 0.72f && hu < 0.5f) b = Biome.Desert;
         else if (hu > 0.5f) b = Biome.Forest;
         else b = Biome.Plains;
-        return new Col { H = hh, Biome = b, T = t, Hu = hu };
+        return new Col { H = hh, Biome = b, T = t, Hu = hu, WaterY = SeaLevel };
     }
 
     public void Generate(Chunk ch)
@@ -91,6 +146,12 @@ public sealed class TerrainGen
                     case Biome.Beach: topB = subB = Blk.Sand; subDepth = 3; break;
                     case Biome.Desert: topB = subB = Blk.Sand; subDepth = 4; break;
                     case Biome.Snowy: topB = Blk.SnowGrass; subB = Blk.Dirt; subDepth = 3; break;
+                    case Biome.Mountains when Earth != null:
+                        if (col.T < 0.27f || col.Elev > 3600) { topB = col.Elev > 4200 ? Blk.Snow : Blk.SnowGrass; subB = Blk.Stone; subDepth = 2; }
+                        else if (col.Elev > 2600) { topB = subB = Blk.Stone; subDepth = 3; }
+                        else if (patch.Noise(wx * 0.03f, 0.5f, wz * 0.03f) > -0.1f) { topB = Blk.Grass; subB = Blk.Dirt; subDepth = 2; }
+                        else { topB = subB = Blk.Stone; subDepth = 3; }
+                        break;
                     case Biome.Mountains:
                         if (col.T < 0.27f || h > 138) { topB = h > 125 ? Blk.Snow : Blk.SnowGrass; subB = Blk.Stone; subDepth = 2; }
                         else if (h > 118) { topB = subB = Blk.Stone; subDepth = 3; }
@@ -147,9 +208,9 @@ public sealed class TerrainGen
                     }
                 }
                 // water
-                if (h < SeaLevel) for (int y = h + 1; y <= SeaLevel; y++) blocks[bi + y * 256] = Blk.Water;
+                if (h < col.WaterY) for (int y = h + 1; y <= col.WaterY; y++) blocks[bi + y * 256] = Blk.Water;
                 // plants
-                if (h >= SeaLevel && h + 1 < Chunk.Height && blocks[bi + (h + 1) * 256] == Blk.Air)
+                if (h >= col.WaterY && h + 1 < Chunk.Height && blocks[bi + (h + 1) * 256] == Blk.Air)
                 {
                     byte top = blocks[bi + h * 256];
                     if (top == Blk.Grass)
@@ -184,11 +245,11 @@ public sealed class TerrainGen
                     case Biome.Plains: chance = 0.012f; break;
                     case Biome.Snowy: chance = 0.07f; break;
                     case Biome.Desert: chance = 0.025f; break;
-                    case Biome.Mountains: chance = col.H < 112 ? 0.05f : 0f; break;
+                    case Biome.Mountains: chance = (Earth != null ? col.Elev < 2300 : col.H < 112) ? 0.05f : 0f; break;
                     default: chance = 0f; break;
                 }
                 if (((hh >> 8) & 1023) / 1024f >= chance) continue;
-                if (col.H < SeaLevel + 1) continue;
+                if (col.H < col.WaterY + 1) continue;
                 PlaceTree(ch, tx, tz, col, hh);
             }
     }

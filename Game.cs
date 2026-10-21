@@ -33,7 +33,8 @@ public sealed class Game : GameWindow
     {
         if (SpawnPoint.HasValue) { var s = SpawnPoint.Value; P.SetPos(s.x, s.y, s.z); return; }
         var (sx, sz) = FindSpawn(world.Gen);
-        P.SetPos(sx + 0.5, Math.Max(world.Gen.Column(sx, sz).H, TerrainGen.SeaLevel) + 1.01, sz + 0.5);
+        var rc = world.Gen.Column(sx, sz);
+        P.SetPos(sx + 0.5, Math.Max(rc.H, rc.WaterY) + 1.01, sz + 0.5);
     }
 
     World world, pano;
@@ -61,7 +62,7 @@ public sealed class Game : GameWindow
     readonly string[] args; bool shotLuanti;
     string shotPath, shotScene = "title", shotScreen; int shotDelay = 40; int shotFrames; bool shotPlaced;
     readonly List<double[]> shotShoots = new(); readonly List<int[]> shotBreaks = new(); readonly List<string> shotCmds = new(); string shotChat;
-    readonly List<(int, int, int, byte)> shotSets = new(); readonly List<int[]> shotFills = new(); double[] shotPos; float[] shotRot; long shotSeed = 1234; long shotTime = -1; bool shotFly;
+    readonly List<(int, int, int, byte)> shotSets = new(); readonly List<int[]> shotFills = new(); double[] shotPos; float[] shotRot; long shotSeed = 1234; EarthConfig shotEarth; long shotTime = -1; bool shotFly;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws, string[] args) : base(gws, nws)
     {
@@ -75,6 +76,7 @@ public sealed class Game : GameWindow
                 case "--scene": shotScene = args[++i]; break;
                 case "--screen": shotScreen = args[++i]; break;
                 case "--seed": shotSeed = long.Parse(args[++i]); break;
+                case "--earth": { var ep = args[++i].Split(','); shotEarth = new EarthConfig { Lat = double.Parse(ep[0], System.Globalization.CultureInfo.InvariantCulture), Lon = double.Parse(ep[1], System.Globalization.CultureInfo.InvariantCulture), Scale = ep.Length > 2 ? int.Parse(ep[2]) : 1 }; break; }
                 case "--time": shotTime = long.Parse(args[++i]); break;
                 case "--delay": shotDelay = int.Parse(args[++i]); break;
                 case "--fly": shotFly = true; break;
@@ -116,7 +118,7 @@ public sealed class Game : GameWindow
         GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
         if (shotPath != null && shotScene != "title")
         {
-            StartGame(new WorldInfo { Name = "__shot", Seed = shotSeed, Dir = null });
+            StartGame(new WorldInfo { Name = "__shot", Seed = shotSeed, Earth = shotEarth, Dir = null });
             if (shotTime >= 0) world.Time = shotTime;
         }
         else ShowTitle();
@@ -152,7 +154,7 @@ public sealed class Game : GameWindow
         pano?.Dispose(); pano = null;
         world?.Dispose();
         info = wi;
-        world = new World(wi.Seed);
+        world = new World(wi.Seed, wi.Earth);
         var st = SaveIO.Load(wi, world);
         P = new Player();
         if (st.Valid)
@@ -164,7 +166,7 @@ public sealed class Game : GameWindow
         else
         {
             var (sx, sz) = FindSpawn(world.Gen);
-            int h = Math.Max(world.Gen.Column(sx, sz).H, TerrainGen.SeaLevel);
+            int h = Math.Max(world.Gen.Column(sx, sz).H, world.Gen.Column(sx, sz).WaterY);
             P.SetPos(sx + 0.5, h + 1.01, sz + 0.5);
             P.Yaw = 0; P.Pitch = 10;
             world.Time = 1000;
@@ -180,13 +182,14 @@ public sealed class Game : GameWindow
 
     static (int, int) FindSpawn(TerrainGen g)
     {
-        for (int r = 0; r < 600; r += 8)
+        bool earth = g.Earth != null;
+        for (int r = 0; r < (earth ? 4000 : 600); r += (earth ? 16 : 8))
             for (int a = 0; a < Math.Max(1, r / 4); a++)
             {
                 double ang = a * Math.PI * 2 / Math.Max(1, r / 4);
                 int x = (int)(Math.Cos(ang) * r), z = (int)(Math.Sin(ang) * r);
                 var c = g.Column(x, z);
-                if (c.H >= TerrainGen.SeaLevel + 1 && c.Biome != Biome.Ocean && c.Biome != Biome.Beach && c.Biome != Biome.Mountains) return (x, z);
+                if (earth ? c.Biome != Biome.Ocean && c.H >= c.WaterY : c.H >= TerrainGen.SeaLevel + 1 && c.Biome != Biome.Ocean && c.Biome != Biome.Beach && c.Biome != Biome.Mountains) return (x, z);
             }
         return (0, 0);
     }
@@ -725,6 +728,7 @@ public sealed class Game : GameWindow
             case "options": SetScreen(new OptionsScreen(new TitleScreen())); break;
             case "select": SetScreen(new SelectWorldScreen()); break;
             case "create": SetScreen(new CreateWorldScreen()); break;
+            case "create_earth": SetScreen(new CreateWorldScreen(true)); break;
             case "pause": SetScreen(new PauseScreen()); break;
             case "inv": SetScreen(new InventoryScreen()); break;
             case "packs": SetScreen(new ResourcePackScreen(new OptionsScreen(new TitleScreen()))); break;

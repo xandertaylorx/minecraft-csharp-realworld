@@ -51,6 +51,16 @@ ambient, bloom and glowing torches/fire with flickering light, god rays, filmic 
 reflections (sky + screen-space reflections of the shore and trees), refraction, depth absorption, foam and sun glints.
 Everything is configurable under **Options > Shader Settings** (shadow quality, reflections, bloom) or can be switched off for the vanilla look.
 
+## Earth mode
+
+**Create New World > World Type: Earth** generates the real planet instead of random terrain. Pick a start location (type `latitude, longitude`
+or cycle the presets) and a scale (1 block = 1, 2, 4, 8, 16 or 32 m).
+
+- Heights and ocean depths come from AWS Terrain Tiles (SRTM/Copernicus + bathymetry), downloaded on demand and cached in `earthcache/` next to your saves. Internet is needed the first time you visit an area.
+- Sea level, beaches, ocean floors and inland lakes (flat patches in the elevation data) follow the real map; temperature and humidity come from latitude and altitude, which picks desert, forest, plains, snow and mountain surfaces.
+- World height is 192 blocks, so very tall relief is compressed (soft curve above ~40 blocks); high-altitude starts use the surrounding ground level as the reference so mountains still read well. Larger scales keep more relief.
+- Not yet: rivers, buildings and roads (OpenStreetMap) and real land-cover data. Debug: `--earthdump lat,lon,scale` prints a height map.
+
 ## Resource packs
 
 The game loads **Minecraft Java Edition resource packs** the same way Minecraft does:

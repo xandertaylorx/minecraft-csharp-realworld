@@ -3,6 +3,7 @@ namespace McClone;
 public sealed class WorldInfo
 {
     public string Name; public long Seed; public string Dir; public DateTime LastPlayed;
+    public EarthConfig Earth;   // null = normal generated world
 }
 
 public sealed class SaveState
@@ -101,7 +102,7 @@ public static class SaveIO
                 var lines = File.ReadAllLines(f);
                 if (lines.Length < 2) continue;
                 var dat = Path.Combine(d, "world.dat");
-                l.Add(new WorldInfo { Name = lines[0], Seed = long.Parse(lines[1]), Dir = d, LastPlayed = File.Exists(dat) ? File.GetLastWriteTime(dat) : File.GetLastWriteTime(f) });
+                l.Add(new WorldInfo { Name = lines[0], Seed = long.Parse(lines[1]), Earth = ParseEarth(lines), Dir = d, LastPlayed = File.Exists(dat) ? File.GetLastWriteTime(dat) : File.GetLastWriteTime(f) });
             }
         }
         catch { }
@@ -109,15 +110,28 @@ public static class SaveIO
         return l;
     }
 
-    public static WorldInfo CreateNew(string name, long seed)
+    static EarthConfig ParseEarth(string[] lines)
+    {
+        // optional third line: "earth <lat> <lon> <metres per block>"
+        if (lines.Length < 3) return null;
+        var p = lines[2].Split(' ');
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        if (p.Length != 4 || p[0] != "earth") return null;
+        return new EarthConfig { Lat = double.Parse(p[1], ci), Lon = double.Parse(p[2], ci), Scale = int.Parse(p[3]) };
+    }
+
+    public static WorldInfo CreateNew(string name, long seed, EarthConfig earth = null)
     {
         string safe = new string(name.Select(c => char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '_' ? c : '_').ToArray()).Trim();
         if (safe.Length == 0) safe = "World";
         string dir = Path.Combine(Saves, safe); int i = 1;
         while (Directory.Exists(dir)) dir = Path.Combine(Saves, safe + " (" + (i++) + ")");
         Directory.CreateDirectory(dir);
-        File.WriteAllLines(Path.Combine(dir, "info.txt"), new[] { name, seed.ToString() });
-        return new WorldInfo { Name = name, Seed = seed, Dir = dir, LastPlayed = DateTime.Now };
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        var lines = new List<string> { name, seed.ToString() };
+        if (earth != null) lines.Add(string.Format(ci, "earth {0} {1} {2}", earth.Lat, earth.Lon, earth.Scale));
+        File.WriteAllLines(Path.Combine(dir, "info.txt"), lines);
+        return new WorldInfo { Name = name, Seed = seed, Earth = earth, Dir = dir, LastPlayed = DateTime.Now };
     }
 
     public static void Delete(WorldInfo w) { try { if (w.Dir != null) Directory.Delete(w.Dir, true); } catch { } }

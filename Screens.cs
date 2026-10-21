@@ -396,8 +396,8 @@ public sealed class SelectWorldScreen : Screen
             if (y + 36 < ListTop || y > ListBottom - 4) continue;
             if (i == sel) { ui.Rect(W / 2f - 108, y - 1, 216, 34, 0xFF808080); ui.Rect(W / 2f - 107, y, 214, 32, 0xFF000000); }
             ui.Text(worlds[i].Name, W / 2f - 100, y + 2, 0xFFFFFFFF);
-            ui.Text("Seed: " + worlds[i].Seed, W / 2f - 100, y + 13, 0xFF808080);
-            ui.Text(worlds[i].LastPlayed.ToString("yyyy-MM-dd HH:mm") + "  Creative", W / 2f - 100, y + 23, 0xFF808080);
+            ui.Text(worlds[i].Earth != null ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "Earth: {0:0.####}, {1:0.####}", worlds[i].Earth.Lat, worlds[i].Earth.Lon) : "Seed: " + worlds[i].Seed, W / 2f - 100, y + 13, 0xFF808080);
+            ui.Text(worlds[i].LastPlayed.ToString("yyyy-MM-dd HH:mm") + (worlds[i].Earth != null ? "  Earth 1:" + worlds[i].Earth.Scale : "  Creative"), W / 2f - 100, y + 23, 0xFF808080);
         }
         // fade edges (like MC)
         ui.GradientRect(0, ListTop, W, 4, 0xFF000000, 0x00000000);
@@ -407,18 +407,36 @@ public sealed class SelectWorldScreen : Screen
 
 public sealed class CreateWorldScreen : Screen
 {
-    TextBox name, seed, focus;
+    TextBox name, seed, loc, focus;
+    bool earth; int scaleIdx, preset = -1;
+    public CreateWorldScreen(bool earth = false) { this.earth = earth; }
     public override bool DirtBg => true;
     public override void OnEscape() => G.SetScreen(new SelectWorldScreen());
     protected override void Build()
     {
         string n0 = name?.Text ?? "New World", s0 = seed?.Text ?? "";
+        string l0 = loc?.Text ?? string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, {1}", EarthConfig.Presets[0].lat, EarthConfig.Presets[0].lon);
+        if (preset < 0) preset = 0;
         name = new TextBox(W / 2 - 100, 60, 200, 20) { Text = n0, MaxLen = 24, Focus = true };
-        seed = new TextBox(W / 2 - 100, 108, 200, 20) { Text = s0, Placeholder = "Leave blank for a random seed", MaxLen = 24 };
+        seed = new TextBox(W / 2 - 100, 127, 200, 20) { Text = s0, Placeholder = "Leave blank for a random seed", MaxLen = 24 };
+        loc = new TextBox(W / 2 - 100, 127, 200, 20) { Text = l0, Placeholder = "latitude, longitude", MaxLen = 28 };
         focus = name;
+        Buttons.Add(new Btn(W / 2 - 100, 86, 200, 20, "World Type: " + (earth ? "Earth" : "Normal"), () => { earth = !earth; Resize(W, H); }));
+        if (earth)
+        {
+            Buttons.Add(new Btn(W / 2 - 100, 151, 98, 20, EarthConfig.Presets[preset].name, () =>
+            {
+                preset = (preset + 1) % EarthConfig.Presets.Length;
+                var p = EarthConfig.Presets[preset];
+                loc.Text = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, {1}", p.lat, p.lon);
+                Resize(W, H);
+            }));
+            Buttons.Add(new Btn(W / 2 + 2, 151, 98, 20, "1 block = " + EarthConfig.Scales[scaleIdx] + " m", () => { scaleIdx = (scaleIdx + 1) % EarthConfig.Scales.Length; Resize(W, H); }));
+        }
         Buttons.Add(new Btn(W / 2 - 100, H - 52, 200, 20, "Create New World", Create));
         Buttons.Add(new Btn(W / 2 - 100, H - 28, 200, 20, "Cancel", () => G.SetScreen(new SelectWorldScreen())));
     }
+    TextBox Second => earth ? loc : seed;
     void Create()
     {
         string nm = string.IsNullOrWhiteSpace(name.Text) ? "New World" : name.Text.Trim();
@@ -428,20 +446,27 @@ public sealed class CreateWorldScreen : Screen
         {
             int h = 0; foreach (char c in seed.Text) h = h * 31 + c; sd = h;
         }
-        var info = SaveIO.CreateNew(nm, sd);
+        EarthConfig ec = null;
+        if (earth)
+        {
+            if (!EarthConfig.TryParse(loc.Text, out double lat, out double lon)) { loc.Text = ""; loc.Placeholder = "Use: 48.8584, 2.2945"; return; }
+            ec = new EarthConfig { Lat = lat, Lon = lon, Scale = EarthConfig.Scales[scaleIdx] };
+        }
+        var info = SaveIO.CreateNew(nm, sd, ec);
         G.StartGame(info);
     }
+    void FocusTo(TextBox t) { focus = t; name.Focus = t == name; seed.Focus = t == seed; loc.Focus = t == loc; }
     public override void MouseDown(int mx, int my, int button)
     {
-        if (name.Hit(mx, my)) { focus = name; name.Focus = true; seed.Focus = false; }
-        else if (seed.Hit(mx, my)) { focus = seed; seed.Focus = true; name.Focus = false; }
+        if (name.Hit(mx, my)) FocusTo(name);
+        else if (Second.Hit(mx, my)) FocusTo(Second);
         base.MouseDown(mx, my, button);
     }
     public override void Char(string s) => focus?.Char(s);
     public override void Key(Keys k)
     {
         if (k == Keys.Backspace) focus?.Back();
-        else if (k == Keys.Tab) { focus = focus == name ? seed : name; name.Focus = focus == name; seed.Focus = focus == seed; }
+        else if (k == Keys.Tab) FocusTo(focus == name ? Second : name);
         else if (k == Keys.Enter || k == Keys.KeyPadEnter) Create();
         else base.Key(k);
     }
@@ -449,10 +474,20 @@ public sealed class CreateWorldScreen : Screen
     {
         ui.TextCentered("Create New World", W / 2f, 15);
         ui.Text("World Name", W / 2f - 100, 47, 0xFFA0A0A0);
-        ui.Text("Seed for the World Generator", W / 2f - 100, 95, 0xFFA0A0A0);
-        ui.Text("Game Mode: Creative", W / 2f - 100, 144, 0xFFA0A0A0);
-        ui.Text("Fly with double-tap Space, infinite blocks", W / 2f - 100, 156, 0xFF707070);
-        name.Draw(ui, G.Time); seed.Draw(ui, G.Time);
+        if (earth)
+        {
+            ui.Text("Start Location (latitude, longitude)", W / 2f - 100, 114, 0xFFA0A0A0);
+            loc.Draw(ui, G.Time);
+            ui.Text("Real terrain. Needs internet on first visit", W / 2f - 100, 176, 0xFF707070);
+        }
+        else
+        {
+            ui.Text("Seed for the World Generator", W / 2f - 100, 114, 0xFFA0A0A0);
+            seed.Draw(ui, G.Time);
+            ui.Text("Game Mode: Creative", W / 2f - 100, 153, 0xFFA0A0A0);
+            ui.Text("Fly with double-tap Space, infinite blocks", W / 2f - 100, 165, 0xFF707070);
+        }
+        name.Draw(ui, G.Time);
     }
 }
 

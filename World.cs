@@ -33,7 +33,7 @@ public sealed partial class World
         return l.ToArray();
     }
 
-    public World(long seed) { Seed = seed; Gen = new TerrainGen(seed); }
+    public World(long seed, EarthConfig earth = null) { Seed = seed; Gen = new TerrainGen(seed, earth); }
 
     // ------------------------------------------------------------------ block access (main thread)
     Chunk cacheC; int cacheCX = int.MinValue, cacheCZ;
