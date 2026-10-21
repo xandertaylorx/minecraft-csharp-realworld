@@ -218,6 +218,8 @@ public sealed class Game : GameWindow
 
     // ------------------------------------------------------------------ Earth mode: location label and teleport
     public bool IsEarth => inGame && world?.Gen.Earth != null;
+    public int EarthScale => world?.Gen.Earth != null ? (int)world.Gen.Earth.Mpb : 1;
+    bool miniOn = true; double miniZoom = -1;
 
     /// <summary>Latitude/longitude of a local block position.</summary>
     public (double lat, double lon) LatLonOf(double x, double z)
@@ -265,7 +267,24 @@ public sealed class Game : GameWindow
         {
             string m = osm.Failing ? "Map data unavailable - retrying (check internet)" : "Loading map data...";
             int w = Ui.TextWidth(m); Ui.Rect(Ui.W - w - 5, y - 1, w + 4, 10, 0x60000000); Ui.Text(m, Ui.W - w - 3, y, osm.Failing ? 0xFFFF6060 : 0xFFE0D080);
+            y += 11;
         }
+        DrawMinimap(y + 2);
+    }
+
+    void DrawMinimap(float y)
+    {
+        if (!miniOn || P == null) return;
+        if (miniZoom < 0) miniZoom = Math.Clamp(16 - Math.Log2(EarthScale), 2, 17.9);
+        float size = Math.Clamp(Ui.H * 0.32f, 48f, 84f);
+        float x = Ui.W - size - 4;
+        var (la, lo) = LatLonOf(P.X, P.Z);
+        MapView.LatLonToUV(la, lo, out double u, out double v);
+        Ui.Rect(x - 1, y - 1, size + 2, size + 2, 0xFF101018);
+        MapView.Draw(Ui, x, y, size, size, u, v, miniZoom, false);
+        MapView.Arrow(Ui, x + size / 2, y + size / 2, P.Yaw, 6);
+        Ui.Rect(x + size / 2 - 3.5f, y + 1.5f, 7, 5.5f, 0x90FFFFFF);
+        Ui.Text("N", x + size / 2 - 2f, y + 2f, 0xFF202030, false, 0.6f);
     }
 
     /// <summary>Re-centres the Earth world on a place: saves, shifts the frame (so coordinates stay small) and reloads there.</summary>
@@ -339,6 +358,10 @@ public sealed class Game : GameWindow
         if (!inGame) return;
         if (k == Keys.Escape) { SaveGame(); SetScreen(new PauseScreen()); return; }
         if (k == Keys.E) { SetScreen(new InventoryScreen()); return; }
+        if (k == Keys.M && IsEarth) { SetScreen(new MapScreen()); return; }
+        if (k == Keys.N && IsEarth) { miniOn = !miniOn; return; }
+        if (IsEarth && miniZoom >= 0 && (k == Keys.Equal || k == Keys.KeyPadAdd)) { miniZoom = Math.Min(17.9, miniZoom + 0.5); return; }
+        if (IsEarth && miniZoom >= 0 && (k == Keys.Minus || k == Keys.KeyPadSubtract)) { miniZoom = Math.Max(2, miniZoom - 0.5); return; }
         if (k == Keys.T) { SetScreen(new ChatScreen("", true)); return; }
         if (k == Keys.Slash || k == Keys.KeyPadDivide) { SetScreen(new ChatScreen("/", true)); return; }
         if (k == Keys.F3) showDebug = !showDebug;
@@ -572,6 +595,7 @@ public sealed class Game : GameWindow
         var fb = FramebufferSize;
         GL.Viewport(0, 0, fb.X, fb.Y);
 
+        MapTiles.Instance.Update();
         if (inGame && world != null)
         {
             if (!(screen != null && screen.Pauses)) { acc += dt; while (acc >= 0.05) { acc -= 0.05; Tick(); } }
@@ -830,6 +854,7 @@ public sealed class Game : GameWindow
             case "select": SetScreen(new SelectWorldScreen()); break;
             case "create": SetScreen(new CreateWorldScreen()); break;
             case "create_earth": SetScreen(new CreateWorldScreen(true)); break;
+            case "map": SetScreen(new MapScreen()); break;
             case "pause": SetScreen(new PauseScreen()); break;
             case "inv": SetScreen(new InventoryScreen()); break;
             case "packs": SetScreen(new ResourcePackScreen(new OptionsScreen(new TitleScreen()))); break;

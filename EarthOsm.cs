@@ -166,7 +166,7 @@ public sealed class OsmGrid
         }
     }
 
-    byte[] FetchMvt(int z, int x, int y)
+    internal static byte[] FetchMvt(int z, int x, int y)
     {
         string file = Path.Combine(CacheDir, z.ToString(), $"{x}_{y}.pbf");
         byte[] data = null;
@@ -356,7 +356,7 @@ public sealed class OsmGrid
 }
 
 /// <summary>Minimal Mapbox Vector Tile (protobuf) reader.</summary>
-static class Mvt
+public static class Mvt
 {
     public sealed class Part { public double[] X, Z; }
     public sealed class Feat { public string Layer; public int Type, Extent = 4096; public Dictionary<string, string> Tags = new(); public List<Part> Parts = new(); }
@@ -437,7 +437,7 @@ static class Mvt
                 }
                 else Skip(d, ref q, wire);
             }
-            if (f.Type == 2 || f.Type == 3) { Decode(f, geom); if (f.Parts.Count > 0) res.Add(f); }
+            if (f.Type >= 1 && f.Type <= 3) { Decode(f, geom); if (f.Parts.Count > 0) res.Add(f); }
         }
     }
 
@@ -467,7 +467,7 @@ static class Mvt
         var cur = new List<(double, double)>();
         void Flush()
         {
-            if (cur.Count >= (f.Type == 3 ? 3 : 2)) f.Parts.Add(new Part { X = cur.Select(c => c.Item1).ToArray(), Z = cur.Select(c => c.Item2).ToArray() });
+            if (cur.Count >= (f.Type == 3 ? 3 : f.Type == 2 ? 2 : 1)) f.Parts.Add(new Part { X = cur.Select(c => c.Item1).ToArray(), Z = cur.Select(c => c.Item2).ToArray() });
             cur.Clear();
         }
         while (i < g.Count)
@@ -477,7 +477,7 @@ static class Mvt
             {
                 for (int k = 0; k < count && i + 1 < g.Count + 0; k++)
                 {
-                    if (cmd == 1 && k == 0 || cmd == 1) { if (cur.Count > 0 && f.Type == 2) Flush(); }
+                    if (cmd == 1) { if (cur.Count > 0 && f.Type != 3) Flush(); }
                     uint a = g[i++], b = g[i++];
                     x += (int)(a >> 1) ^ -(int)(a & 1); y += (int)(b >> 1) ^ -(int)(b & 1);
                     cur.Add((x, y));

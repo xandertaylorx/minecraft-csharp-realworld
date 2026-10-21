@@ -92,7 +92,7 @@ public static class Commands
                 "clear" => "/clear [<targets>] [<item>]",
                 "time" => "/time set <day|noon|night|midnight|sunrise|sunset|ticks> | add <ticks> | query <daytime|gametime|day>",
                 "gamemode" => "/gamemode <creative|spectator>",
-                "tp" or "teleport" => "/tp [<targets>] <x> <y> <z> [<yaw> <pitch>]   (~ = relative). Earth worlds: /tp <place name> or /tp <latitude> <longitude>",
+                "tp" or "teleport" => "/tp [<targets>] <x> <y> <z> [<yaw> <pitch>]   (~ = relative). Earth worlds: /tp <place, address, postcode or zip code> or /tp <latitude> <longitude>",
                 "where" => "/where   (Earth worlds: your latitude and longitude)",
                 "setblock" => "/setblock <x> <y> <z> <block> [destroy|keep|replace]",
                 "fill" => "/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [replace [<filter>]|destroy|hollow|keep|outline]",
@@ -200,10 +200,13 @@ public static class Commands
         var p = g.Me;
         if (g.IsEarth && a.Length > i)
         {
-            bool numeric = Num(a[i], p.X, out _);
-            if (!numeric)
+            var toks = a.Skip(i).ToArray();
+            bool allNum = toks.All(t => Num(t, 0, out _));
+            bool isLatLon = toks.Length == 2 && allNum && !toks[0].StartsWith("~") && !toks[1].StartsWith("~");
+            // x y z [yaw pitch] stays a local coordinate teleport; anything else is a place name, address, postcode or zip code
+            if (!(allNum && toks.Length >= 3) && !isLatLon)
             {
-                string q = string.Join(' ', a.Skip(i));
+                string q = string.Join(' ', toks);
                 Ok(g, "Searching for " + q + "...");
                 Task.Run(() =>
                 {
@@ -212,7 +215,7 @@ public static class Commands
                 });
                 return;
             }
-            if (a.Length == i + 2 && !a[i].StartsWith("~") && !a[i + 1].StartsWith("~")
+            if (isLatLon
                 && double.TryParse(a[i], NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) && double.TryParse(a[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var lon))
             {
                 if (lat < -85 || lat > 85 || lon < -180 || lon > 180) { Err(g, "Latitude must be -85..85 and longitude -180..180"); return; }

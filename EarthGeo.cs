@@ -76,12 +76,53 @@ public static class EarthGeo
         ["hong kong"] = (22.2793, 114.1628, "Hong Kong"), ["san diego"] = (32.7157, -117.1611, "San Diego, United States"),
     };
 
-    /// <summary>Finds a place by name (built-in landmarks first, then Nominatim). Returns false when nothing was found.</summary>
+    static readonly System.Text.RegularExpressions.Regex UkPostcode = new(@"^[A-Za-z]{1,2}\d[A-Za-z\d]?\s*\d[A-Za-z]{2}$");
+    static readonly System.Text.RegularExpressions.Regex UsZip = new(@"^\d{5}(-\d{4})?$");
+
+    static string PlainGet(string url)
+    {
+        try { return http.GetStringAsync(url).GetAwaiter().GetResult(); }
+        catch { return null; }
+    }
+
+    /// <summary>Finds a place by name, address or postcode (UK postcodes and US zips are looked up exactly; built-in landmarks; then Nominatim).
+    /// Returns false when nothing was found.</summary>
     public static bool Search(string q, out double lat, out double lon, out string name)
     {
         lat = lon = 0; name = q;
-        if (Known.TryGetValue(q.Trim(), out var k)) { lat = k.lat; lon = k.lon; name = k.name; return true; }
+        q = q.Trim();
+        if (Known.TryGetValue(q, out var k)) { lat = k.lat; lon = k.lon; name = k.name; return true; }
         var ci = System.Globalization.CultureInfo.InvariantCulture;
+        if (UkPostcode.IsMatch(q))
+        {
+            string pj = PlainGet("https://api.postcodes.io/postcodes/" + Uri.EscapeDataString(q.Replace(" ", "")));
+            if (pj != null)
+                try
+                {
+                    using var pd = JsonDocument.Parse(pj);
+                    var r = pd.RootElement.GetProperty("result");
+                    lat = r.GetProperty("latitude").GetDouble(); lon = r.GetProperty("longitude").GetDouble();
+                    string pc = Str(r, "postcode") ?? q.ToUpperInvariant();
+                    string area = Str(r, "admin_district") ?? Str(r, "region");
+                    name = area != null ? $"{pc}, {area}, {Str(r, "country") ?? "United Kingdom"}" : pc;
+                    return true;
+                }
+                catch { }
+        }
+        else if (UsZip.IsMatch(q))
+        {
+            string zj = PlainGet("https://api.zippopotam.us/us/" + q.Substring(0, 5));
+            if (zj != null)
+                try
+                {
+                    using var zd = JsonDocument.Parse(zj);
+                    var p = zd.RootElement.GetProperty("places")[0];
+                    lat = double.Parse(Str(p, "latitude"), ci); lon = double.Parse(Str(p, "longitude"), ci);
+                    name = $"{q.Substring(0, 5)}, {Str(p, "place name")}, {Str(p, "state")}, United States";
+                    return true;
+                }
+                catch { }
+        }
         string json = Get("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en&q=" + Uri.EscapeDataString(q));
         if (json == null) return false;
         try
