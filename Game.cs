@@ -177,7 +177,7 @@ public sealed class Game : GameWindow
                 var gen = world.Gen;
                 spawnTask = Task.Run(() =>
                 {
-                    gen.Osm?.EnsureLoaded(0 + gen.FrameX, 0 + gen.FrameZ, 20000);
+                    gen.Osm?.EnsureLoaded(0 + gen.FrameX, 0 + gen.FrameZ, 8000);   // brief grace period; the map keeps loading in the background
                     var (sx, sz) = FindSpawn(gen);
                     var c = gen.Column(sx, sz);
                     return (sx, sz, Math.Max(c.H, c.WaterY));
@@ -227,6 +227,18 @@ public sealed class Game : GameWindow
         return (la, lo);
     }
 
+    /// <summary>Map data can arrive after the terrain: if a building was generated around the player, lift them out of it.</summary>
+    void UnstickPlayer()
+    {
+        int x = (int)Math.Floor(P.X), z = (int)Math.Floor(P.Z), y = (int)Math.Floor(P.Y);
+        if (!world.IsLoaded(x, z)) return;
+        bool Solid(int yy) => yy >= 0 && yy < Chunk.Height && Blk.Solid[world.GetBlock(x, yy, z)];
+        if (!Solid(y) && !Solid(y + 1)) return;
+        int ny = y;
+        while (ny < Chunk.Height - 2 && (Solid(ny) || Solid(ny + 1))) ny++;
+        P.SetPos(P.X, ny + 0.01, P.Z);
+    }
+
     void UpdateGeo()
     {
         if (!IsEarth || P == null) return;
@@ -247,7 +259,13 @@ public sealed class Game : GameWindow
     {
         float y = showDebug ? 46 : 3;
         if (geoName.Length > 0) { int w = Ui.TextWidth(geoName); Ui.Rect(Ui.W - w - 5, y - 1, w + 4, 10, 0x80000000); Ui.Text(geoName, Ui.W - w - 3, y, 0xFFFFFFFF); y += 11; }
-        if (geoCoords.Length > 0) { int w = Ui.TextWidth(geoCoords); Ui.Rect(Ui.W - w - 5, y - 1, w + 4, 10, 0x60000000); Ui.Text(geoCoords, Ui.W - w - 3, y, 0xFFB0B0B0); }
+        if (geoCoords.Length > 0) { int w = Ui.TextWidth(geoCoords); Ui.Rect(Ui.W - w - 5, y - 1, w + 4, 10, 0x60000000); Ui.Text(geoCoords, Ui.W - w - 3, y, 0xFFB0B0B0); y += 11; }
+        var osm = world.Gen.Osm;
+        if (osm != null && (osm.Failing || osm.PendingTiles > 0))
+        {
+            string m = osm.Failing ? "Map data unavailable - retrying (check internet)" : "Loading map data...";
+            int w = Ui.TextWidth(m); Ui.Rect(Ui.W - w - 5, y - 1, w + 4, 10, 0x60000000); Ui.Text(m, Ui.W - w - 3, y, osm.Failing ? 0xFFFF6060 : 0xFFE0D080);
+        }
     }
 
     /// <summary>Re-centres the Earth world on a place: saves, shifts the frame (so coordinates stay small) and reloads there.</summary>
@@ -487,6 +505,7 @@ public sealed class Game : GameWindow
     {
         tickCount++;
         UpdateGeo();
+        if (IsEarth && (tickCount & 7) == 0 && !spectator && spawnTask == null) UnstickPlayer();
         if (DoDaylightCycle) world.Time++;
         world.TickScheduled();
         world.UpdateParticles();

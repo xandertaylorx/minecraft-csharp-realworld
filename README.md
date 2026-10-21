@@ -58,11 +58,12 @@ or cycle the presets) and a scale (1 block = 1, 2, 4, 8, 16 or 32 m).
 
 - **Terrain and oceans:** real heights and sea-floor depths from AWS Terrain Tiles (SRTM/Copernicus + bathymetry). Sea level, beaches and big flat lakes follow the real map.
 - **Materials:** NASA MODIS land cover picks forest (spruce for needleleaf), grassland, cropland, shrub, desert, barren rock, snow and ice. Steep ground in dry regions (Grand Canyon, Utah, Arizona) is banded terracotta / red sandstone, and steep ground elsewhere is bare stone.
-- **Map features:** buildings (walls, windows, doors, flat roofs, heights from `height` / `building:levels`), roads, paths, railways, bridges, rivers, streams, canals and lakes from OpenStreetMap, pulled from the public Overpass servers. Roads are Asphalt, footpaths Concrete or Gravel.
+- **Map features:** buildings (walls, windows, doors, flat roofs, real heights), roads, paths, railways, bridges, rivers, streams, canals and lakes from OpenStreetMap, served as OpenFreeMap vector tiles (fast and free, no key). Roads are Asphalt, footpaths Concrete or Gravel.
 - **Place name:** the top right shows the city and country you are in plus your latitude/longitude.
 - **Teleport:** `/tp london`, `/tp grand canyon`, `/tp Kyoto` (any place name) or `/tp 48.85 2.35`. `/tp <x> <y> <z>` still works for local coordinates, and `/where` prints where you are. A teleport re-centres the world (your edits stay where you built them).
-- **Downloads and caches:** data is fetched on demand and cached in `earthcache/` next to your saves; the first visit to a place needs internet. Buildings, roads and rivers appear a few seconds to a minute after the terrain, because the public map servers can be slow (chunks regenerate when the map tile arrives).
+- **Downloads and caches:** data is fetched on demand and cached in `earthcache/` next to your saves; the first visit to a place needs internet. Buildings, roads and rivers appear a moment after the terrain (chunks regenerate when the map tile arrives).
 - **Limits:** the world is 192 blocks tall, so big relief is compressed (1:1 near the start level, softly squashed above ~40 blocks); for high-altitude starts the nearby ground is used as the reference level. Land below sea level (e.g. the Netherlands) is flooded. Roofs are flat, interiors are empty, and very large lakes or rivers that OpenStreetMap stores as relations are only covered when the elevation data shows them as flat water.
+- Map data: (c) OpenStreetMap contributors via OpenFreeMap / OpenMapTiles; land cover from NASA GIBS (MODIS); elevation from AWS Terrain Tiles; place names from Nominatim.
 - Debug: `--earthdump lat,lon,scale` prints a height map; `--earthtp lat,lon,scale lat,lon` tests a teleport.
 
 ## Resource packs
