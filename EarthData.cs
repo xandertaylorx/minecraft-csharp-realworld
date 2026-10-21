@@ -42,6 +42,10 @@ public sealed class EarthData
     readonly double cosLat0;
     /// <summary>Elevation (m) that maps to block height 62. 0 (real sea level) for coastal/low starts; for high ground the start point sits ~30 blocks above it so nearby relief stays readable.</summary>
     public readonly float Datum;
+    /// <summary>True when block height 62 is real sea level (Datum 0); otherwise inland, with the valley floor near BaseY.</summary>
+    public readonly bool Sea;
+    public readonly int BaseY;                  // block height that the datum elevation maps to
+    readonly float Lin, Room, Kscale;
     readonly long span;                       // pixels across the whole world at this zoom
     readonly ConcurrentDictionary<long, Lazy<float[]>> tiles = new();
     static readonly System.Net.Http.HttpClient http = MakeHttp();
@@ -64,12 +68,22 @@ public sealed class EarthData
         double mppEq = 156543.03392 / n;       // metres per pixel at the equator (Web Mercator)
         pxPerBlock = Mpb / (cosLat0 * mppEq);  // pixels covered by one block at the origin latitude
         FrameX = cfg.FrameX; FrameZ = cfg.FrameZ;
-        var around = new List<float>();   // median ground level within ~400 blocks of the frame centre decides the vertical datum
-        for (int gz = -4; gz <= 4; gz++) for (int gx = -4; gx <= 4; gx++) around.Add(Elevation(FrameX + gx * 100, FrameZ + gz * 100));
+        // Fit the vertical scale to the terrain around the frame centre: heights stay 1:1 for as much range as the 192-block world
+        // allows, and only the extreme relief above that is eased in so peaks still read as peaks.
+        var around = new List<float>();
+        for (int gz = -6; gz <= 6; gz++) for (int gx = -6; gx <= 6; gx++) around.Add(Elevation(FrameX + gx * 150, FrameZ + gz * 150));
         around.Sort();
-        float e0 = around[around.Count / 2];
-        // quantised in steps of 100 blocks so nearby frames agree on the datum (keeps edits aligned vertically)
-        Datum = Math.Max(0, (float)Math.Floor((e0 - 20 * Mpb) / (100 * Mpb))) * 100f * (float)Mpb;
+        float p5 = around[(int)(around.Count * 0.05)], p95 = around[(int)(around.Count * 0.95)];
+        Sea = p5 < 50f * (float)Mpb;                       // low coastal / lowland: real sea level is the datum
+        if (Sea) { Datum = 0; BaseY = 62; Lin = 90f; Room = 28f; }
+        else
+        {
+            // inland: the local valley floor sits low in the world so hills have room to rise (quantised so nearby frames agree)
+            float step = 25f * (float)Mpb;
+            Datum = (float)Math.Floor(p5 / step) * step; BaseY = 36; Lin = 100f; Room = 42f;
+        }
+        float rb = (p95 - Datum) / (float)Mpb;              // local relief in blocks
+        Kscale = Math.Max(40f, (rb - Lin) / 2f);
     }
 
     public double LatAt(double z) => Math.Clamp(Lat0 - z * Mpb / 111320.0, -85, 85);
@@ -235,20 +249,13 @@ public sealed class EarthData
         return true;
     }
 
-    /// <summary>Converts real metres to block height relative to block y=62. 1:1 close to the datum, compressed for big relief so peaks and trenches fit the world height.</summary>
+    /// <summary>Converts real metres to block height relative to BaseY: 1:1 up to Lin blocks above the datum, then eased into the remaining headroom.</summary>
     public float ToBlocks(float elevM)
     {
         float e = (elevM - Datum) / (float)Mpb;
-        if (e >= 0)
-        {
-            const float knee = 40f;
-            if (e <= knee) return e;
-            float raw = knee + 0.9f * MathF.Pow(e - knee, 0.6f);
-            return raw <= 70f ? raw : 70f + 42f * MathF.Tanh((raw - 70f) / 42f);   // soft ceiling (max +112)
-        }
+        if (e >= 0) return e <= Lin ? e : Lin + Room * (1f - MathF.Exp(-(e - Lin) / Kscale));
         float d = -e;
-        const float dknee = 30f;
-        float draw = d <= dknee ? d : dknee + 0.9f * MathF.Pow(d - dknee, 0.6f);
-        return -(draw <= 30f ? draw : 30f + 22f * MathF.Tanh((draw - 30f) / 22f));    // soft floor (max -52)
+        if (Sea) return -(d <= 30f ? d : 30f + 22f * (1f - MathF.Exp(-(d - 30f) / 150f)));    // sea floor down to about y=10
+        return -(d <= 20f ? d : 20f + 10f * (1f - MathF.Exp(-(d - 20f) / 60f)));              // below the valley floor, down to about y=6
     }
 }

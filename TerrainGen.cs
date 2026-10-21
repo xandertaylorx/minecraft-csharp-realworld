@@ -83,20 +83,20 @@ public sealed class TerrainGen
         return Earth.LandClass(wx, wz);
     }
 
-    int SimpleH(int mx, int mz) => Math.Clamp((int)MathF.Round(SeaLevel + Earth.ToBlocks(Earth.Elevation(mx, mz))), 3, Chunk.Height - 14);
+    int SimpleH(int mx, int mz) => Math.Clamp((int)MathF.Round(Earth.BaseY + Earth.ToBlocks(Earth.Elevation(mx, mz))), 3, Chunk.Height - 14);
 
     /// <summary>Terrain surface height of a master column without map features (also the building foundation reference).</summary>
     int EarthTerrainH(int mx, int mz, out float elev, out int water)
     {
         elev = Earth.Elevation(mx, mz);
-        bool sea = Earth.Datum == 0;   // high-altitude worlds have no sea nearby
+        bool sea = Earth.Sea;   // inland worlds have no sea nearby
         water = sea ? SeaLevel : 0;
         if (elev >= 1f && Earth.FlatWater(mx, mz, out float surf))
         {
-            water = Math.Clamp(SeaLevel + (int)MathF.Round(Earth.ToBlocks(surf)), 12, Chunk.Height - 14);
+            water = Math.Clamp(Earth.BaseY + (int)MathF.Round(Earth.ToBlocks(surf)), 12, Chunk.Height - 14);
             return water - 3;
         }
-        float h = SeaLevel + Earth.ToBlocks(elev);
+        float h = Earth.BaseY + Earth.ToBlocks(elev);
         if (elev > 2f) h += detail.Fbm2(mx * 0.05f, mz * 0.05f, 2) * 1.6f / MathF.Sqrt((float)Earth.Mpb);
         int hh = Math.Clamp((int)MathF.Round(h), 3, Chunk.Height - 14);
         if (sea && elev <= 0.05f) hh = Math.Min(hh, SeaLevel - 1);
@@ -106,7 +106,7 @@ public sealed class TerrainGen
     Col EarthBase(int mx, int mz)
     {
         int hh = EarthTerrainH(mx, mz, out float elev, out int water);
-        bool sea = Earth.Datum == 0;
+        bool sea = Earth.Sea;
         int lc = LcAt(mx, mz);
         var (t, hu) = EarthClimate(mx, mz, elev, lc);
         float tc = t * 48 - 12;
