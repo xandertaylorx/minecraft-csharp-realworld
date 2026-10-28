@@ -1,6 +1,6 @@
-# minecraft-remake-csharp
+# minecraft-csharp-realworld
 
-A from-scratch, Minecraft-style voxel game written in **C# / .NET 10** with **OpenTK** (OpenGL 3.3 core).
+A from-scratch, Minecraft-style voxel game written in **C# / .NET 10** with **OpenTK** (OpenGL 3.3 core), with an **Earth mode** that builds the real world: real terrain, buildings, roads, rivers, a world map and teleporting by place name or postcode.
 No Mojang assets are bundled: every default texture, the font and the UI are generated in code (you can load your own resource packs).
 
 > Not affiliated with or endorsed by Mojang AB / Microsoft.
